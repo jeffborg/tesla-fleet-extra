@@ -30,8 +30,4 @@ class TeslaUserImplementation(AuthImplementation):
     @property
     def extra_authorize_data(self) -> dict[str, Any]:
         """Extra data that needs to be appended to the authorize url."""
-        return {
-            "prompt": "login",
-            "prompt_missing_scopes": "true",
-            "scope": " ".join(SCOPES),
-        }
+        return {"prompt": "login", "scope": " ".join(SCOPES)}
