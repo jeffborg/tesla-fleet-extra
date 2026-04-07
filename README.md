@@ -22,3 +22,25 @@ This is a custom component that extends the built-in Home Assistant Tesla Fleet 
 
 - These commands use the **Vehicle Command Protocol** (signed protobuf). They will not work on older vehicles that don't support signed commands.
 - Because the Tesla API does not report the state of these settings, Home Assistant uses **assumed state** — it remembers the last command you sent. After a HA restart the state shows as unknown until toggled once.
+
+## Releasing a new version
+
+Releases are created automatically by GitHub Actions when a version tag is pushed. The tag must match the `version` field in `custom_components/tesla_fleet/manifest.json`.
+
+1. Update the version in `custom_components/tesla_fleet/manifest.json`:
+   ```json
+   "version": "1.0.1"
+   ```
+2. Commit the change:
+   ```bash
+   git commit -am "Bump version to 1.0.1"
+   ```
+3. Tag and push:
+   ```bash
+   git tag v1.0.1
+   git push origin main --tags
+   ```
+
+GitHub Actions will validate that the tag matches the manifest version, package the integration into a zip, and publish a GitHub Release with auto-generated release notes.
+
+> **Note:** If the tag version and manifest version do not match, the release workflow will fail before creating any release.
