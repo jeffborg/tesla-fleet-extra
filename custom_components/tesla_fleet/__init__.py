@@ -2,6 +2,7 @@
 
 from typing import Final
 
+from aiohttp.client_exceptions import ClientResponseError
 import jwt
 from tesla_fleet_api import TeslaFleetApi, is_valid_region
 from tesla_fleet_api.const import Scope
@@ -16,14 +17,9 @@ from tesla_fleet_api.exceptions import (
 from tesla_fleet_api.tesla import VehicleFleet
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ACCESS_TOKEN, Platform
+from homeassistant.const import CONF_ACCESS_TOKEN, CONF_TOKEN, Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import (
-    ConfigEntryAuthFailed,
-    ConfigEntryNotReady,
-    OAuth2TokenRequestError,
-    OAuth2TokenRequestReauthError,
-)
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.config_entry_oauth2_flow import (
@@ -62,48 +58,6 @@ type TeslaFleetConfigEntry = ConfigEntry[TeslaFleetData]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
-async def _async_get_products(tesla: TeslaFleetApi) -> list[dict]:
-    """Get products from Tesla Fleet API with region fallback handling."""
-    try:
-        return (await tesla.products())["response"]
-    except InvalidRegion:
-        LOGGER.warning("Region is invalid, trying to find the correct region")
-    except (
-        InvalidToken,
-        OAuthExpired,
-        LoginRequired,
-        OAuth2TokenRequestReauthError,
-    ) as e:
-        raise ConfigEntryAuthFailed from e
-    except (TeslaFleetError, OAuth2TokenRequestError) as e:
-        raise ConfigEntryNotReady from e
-
-    try:
-        await tesla.find_server()
-    except (
-        InvalidToken,
-        OAuthExpired,
-        LoginRequired,
-        LibraryError,
-        OAuth2TokenRequestReauthError,
-    ) as e:
-        raise ConfigEntryAuthFailed from e
-    except (TeslaFleetError, OAuth2TokenRequestError) as e:
-        raise ConfigEntryNotReady from e
-
-    try:
-        return (await tesla.products())["response"]
-    except (
-        InvalidToken,
-        OAuthExpired,
-        LoginRequired,
-        OAuth2TokenRequestReauthError,
-    ) as e:
-        raise ConfigEntryAuthFailed from e
-    except (TeslaFleetError, OAuth2TokenRequestError) as e:
-        raise ConfigEntryNotReady from e
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: TeslaFleetConfigEntry) -> bool:
     """Set up TeslaFleet config."""
 
@@ -121,15 +75,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TeslaFleetConfigEntry) -
         )
         raise ConfigEntryAuthFailed from e
 
-    oauth_session = OAuth2Session(hass, entry, implementation)
-    try:
-        await oauth_session.async_ensure_token_valid()
-    except OAuth2TokenRequestReauthError as err:
-        raise ConfigEntryAuthFailed from err
-    except OAuth2TokenRequestError as err:
-        raise ConfigEntryNotReady from err
-
-    access_token = oauth_session.token[CONF_ACCESS_TOKEN]
+    access_token = entry.data[CONF_TOKEN][CONF_ACCESS_TOKEN]
     session = async_get_clientsession(hass)
 
     token = jwt.decode(access_token, options={"verify_signature": False})
@@ -137,8 +83,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: TeslaFleetConfigEntry) -
     region_code = token["ou_code"].lower()
     region = region_code if is_valid_region(region_code) else None
 
+    oauth_session = OAuth2Session(hass, entry, implementation)
+
     async def _get_access_token() -> str:
-        await oauth_session.async_ensure_token_valid()
+        try:
+            await oauth_session.async_ensure_token_valid()
+        except ClientResponseError as e:
+            if e.status == 401:
+                raise ConfigEntryAuthFailed from e
+            raise ConfigEntryNotReady from e
         token: str = oauth_session.token[CONF_ACCESS_TOKEN]
         return token
 
@@ -152,7 +105,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: TeslaFleetConfigEntry) -
         energy_scope=Scope.ENERGY_DEVICE_DATA in scopes,
         vehicle_scope=Scope.VEHICLE_DEVICE_DATA in scopes,
     )
-    products = await _async_get_products(tesla)
+    try:
+        products = (await tesla.products())["response"]
+    except (InvalidToken, OAuthExpired, LoginRequired) as e:
+        raise ConfigEntryAuthFailed from e
+    except InvalidRegion:
+        try:
+            LOGGER.warning("Region is invalid, trying to find the correct region")
+            await tesla.find_server()
+            try:
+                products = (await tesla.products())["response"]
+            except TeslaFleetError as e:
+                raise ConfigEntryNotReady from e
+        except LibraryError as e:
+            raise ConfigEntryAuthFailed from e
+    except TeslaFleetError as e:
+        raise ConfigEntryNotReady from e
 
     device_registry = dr.async_get(hass)
 

@@ -16,7 +16,7 @@
     "tesla-fleet-api"
   ],
   "requirements": [
-    "tesla-fleet-api==1.4.5"
+    "tesla-fleet-api==1.4.3"
   ],
   "version": "1.0.0"
 }
