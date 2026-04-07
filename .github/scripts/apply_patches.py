@@ -144,17 +144,16 @@ def patch_switch() -> None:
     # 3. Add custom switch descriptions if missing
     if "vehicle_state_low_power_mode" not in text:
         # Find the closing paren of the VEHICLE_DESCRIPTIONS tuple and insert before it.
-        # The tuple ends with the last entry's closing ")," followed by a line with just ")".
-        import re as _re
-        # Match the closing of VEHICLE_DESCRIPTIONS: last item's closing ",\n)\n"
-        m = _re.search(
-            r"scopes=\[Scope\.VEHICLE_CHARGING_CMDS, Scope\.VEHICLE_CMDS\],\n    \),\n\)",
+        # Match the last description's scopes line and the tuple's closing paren,
+        # allowing flexible whitespace around brackets.
+        m = re.search(
+            r"scopes=\[Scope\.VEHICLE_CHARGING_CMDS,\s*Scope\.VEHICLE_CMDS\],\s*\),\s*\)",
             text,
         )
         if m:
-            # Insert after the "    )," line (which is m.end() - 2 to keep "\n)")
-            insert_at = m.end() - len("\n)")
-            text = text[:insert_at] + "\n" + SWITCH_CUSTOM_DESCRIPTIONS.rstrip("\n") + text[insert_at:]
+            # Find the position of the outer closing ")" and insert before it
+            closing_paren_pos = text.rindex(")", m.start(), m.end())
+            text = text[:closing_paren_pos] + SWITCH_CUSTOM_DESCRIPTIONS + text[closing_paren_pos:]
             changed = True
             print("switch.py: added custom switch descriptions")
         else:
@@ -180,10 +179,19 @@ def patch_switch() -> None:
 
     # 6. Update _async_update_attrs to preserve assumed_state value if missing
     if "if not self.entity_description.assumed_state:" not in text:
-        old = "            self._attr_is_on = None\n"
-        # Only replace the one in _async_update_attrs (check context)
+        # Replace the inner `self._attr_is_on = None` that is inside
+        # `if self._value is None:` in _async_update_attrs.
+        # Use surrounding context to avoid touching other None assignments.
+        old = (
+            "        if self._value is None:\n"
+            "            self._attr_is_on = None\n"
+        )
+        new = (
+            "        if self._value is None:\n"
+            + SWITCH_ASSUMED_STATE_UPDATE
+        )
         if old in text:
-            text = text.replace(old, SWITCH_ASSUMED_STATE_UPDATE, 1)
+            text = text.replace(old, new, 1)
             changed = True
             print("switch.py: updated _async_update_attrs for assumed_state")
 
