@@ -36,8 +36,10 @@ def test_manifest_pins_dependency_with_power_mode_methods() -> None:
 
 
 def test_manifest_has_custom_component_version() -> None:
-    # Required for HACS / custom-component loading.
-    assert _load_json("manifest.json")["version"] == "1.0.0"
+    # Required for HACS / custom-component loading; must be valid semver so the
+    # release workflow's tag-vs-version check works.
+    version = _load_json("manifest.json")["version"]
+    assert re.fullmatch(r"\d+\.\d+\.\d+", version), version
 
 
 def test_switch_source_uses_public_power_mode_api() -> None:
