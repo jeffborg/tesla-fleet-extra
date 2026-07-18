@@ -59,47 +59,37 @@ def patch_manifest() -> None:
 # switch.py
 # ---------------------------------------------------------------------------
 
-SWITCH_IMPORT = "from homeassistant.exceptions import HomeAssistantError\n"
-
-SWITCH_ASSUMED_FIELD = "    assumed_state: bool = False\n"
+SWITCH_ASSUMED_FIELD = (
+    "    assumed_state: bool = False\n    signing_required: bool = False\n"
+)
 
 SWITCH_CUSTOM_DESCRIPTIONS = """\
     TeslaFleetSwitchEntityDescription(
         key="vehicle_state_low_power_mode",
-        on_func=lambda api: _set_power_mode(api, "set_low_power_mode", True),
-        off_func=lambda api: _set_power_mode(api, "set_low_power_mode", False),
+        on_func=lambda api: api.set_low_power_mode(on=True),
+        off_func=lambda api: api.set_low_power_mode(on=False),
         scopes=[Scope.VEHICLE_CMDS],
         assumed_state=True,
+        signing_required=True,
     ),
     TeslaFleetSwitchEntityDescription(
         key="vehicle_state_keep_accessory_power_on",
-        on_func=lambda api: _set_power_mode(api, "set_keep_accessory_power_mode", True),
-        off_func=lambda api: _set_power_mode(
-            api, "set_keep_accessory_power_mode", False
-        ),
+        on_func=lambda api: api.set_keep_accessory_power_mode(on=True),
+        off_func=lambda api: api.set_keep_accessory_power_mode(on=False),
         scopes=[Scope.VEHICLE_CMDS],
         assumed_state=True,
+        signing_required=True,
     ),
 """
 
-SWITCH_HELPER = '''
-async def _set_power_mode(api: Any, command: str, on: bool) -> dict[str, Any]:
-    """Send a low power / keep accessory power command via the public API.
-
-    These are Vehicle Command Protocol (signed) commands, so the method is only
-    present when the vehicle requires command signing (``api`` is a
-    ``VehicleSigned``). Fail gracefully for vehicles that do not support them.
-    """
-    func = getattr(api, command, None)
-    if func is None:
-        raise HomeAssistantError(
-            "Keep accessory power and low power mode require the Vehicle"
-            " Command Protocol (signed commands), which this vehicle does"
-            " not support."
-        )
-    return await func(on=on)
-
-'''
+# Only create the signed-only switches for vehicles that require command
+# signing (their VehicleSigned api exposes the set_*_mode methods).
+SWITCH_SETUP_FILTER = """\
+                for description in VEHICLE_DESCRIPTIONS
+                # Signed-only commands (low power / keep accessory power) are
+                # only offered on vehicles that require command signing.
+                if vehicle.signing or not description.signing_required
+"""
 
 SWITCH_ASSUMED_INIT = """\
         if description.assumed_state:
@@ -134,24 +124,15 @@ def patch_switch() -> None:
         print("switch.py: customizations already present")
         return
 
-    # 1. HomeAssistantError import (alphabetical: after ...core import HomeAssistant)
-    text = _replace_once(
-        text,
-        "from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback\n",
-        SWITCH_IMPORT
-        + "from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback\n",
-        "HomeAssistantError import",
-    )
-
-    # 2. assumed_state field on the entity description dataclass
+    # 1. assumed_state + signing_required fields on the description dataclass
     text = _replace_once(
         text,
         "    unique_id: str | None = None\n",
         "    unique_id: str | None = None\n" + SWITCH_ASSUMED_FIELD,
-        "assumed_state dataclass field",
+        "description dataclass fields",
     )
 
-    # 3. Custom switch descriptions, appended to VEHICLE_DESCRIPTIONS
+    # 2. Custom switch descriptions, appended to VEHICLE_DESCRIPTIONS
     m = re.search(
         r"scopes=\[Scope\.VEHICLE_CHARGING_CMDS,\s*Scope\.VEHICLE_CMDS\],\s*\n\s*\),\n\)",
         text,
@@ -161,15 +142,15 @@ def patch_switch() -> None:
     closing = text.rindex(")", m.start(), m.end())
     text = text[:closing] + SWITCH_CUSTOM_DESCRIPTIONS + text[closing:]
 
-    # 4. _set_power_mode helper, before async_setup_entry
+    # 3. Only build the signed-only switches for signing-capable vehicles
     text = _replace_once(
         text,
-        "\nasync def async_setup_entry(\n",
-        SWITCH_HELPER + "\nasync def async_setup_entry(\n",
-        "async_setup_entry anchor",
+        "                for description in VEHICLE_DESCRIPTIONS\n",
+        SWITCH_SETUP_FILTER,
+        "async_setup_entry signing filter",
     )
 
-    # 5. assumed_state handling in the vehicle switch __init__
+    # 4. assumed_state handling in the vehicle switch __init__
     text = _replace_once(
         text,
         '            self._attr_unique_id = f"{data.vin}-{description.unique_id}"\n',
@@ -178,7 +159,7 @@ def patch_switch() -> None:
         "assumed_state __init__ handling",
     )
 
-    # 6. Preserve assumed state in _async_update_attrs
+    # 5. Preserve assumed state in _async_update_attrs
     text = _replace_once(
         text,
         "        if self._value is None:\n            self._attr_is_on = None\n",
@@ -222,7 +203,7 @@ _strings_cache: dict[str, dict] = {}
 
 
 def _fetch_json(url: str) -> dict:
-    with urllib.request.urlopen(url) as resp:  # noqa: S310 - fixed github host
+    with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310 - fixed github host
         return json.loads(resp.read().decode())
 
 
@@ -254,7 +235,11 @@ def _lookup(ref: str, self_strings: dict):
         raise PatchError(f"unknown translation reference namespace: {ref}")
     cur = base
     for key in path:
+        if not isinstance(cur, dict) or key not in cur:
+            raise PatchError(f"unresolved translation reference: [%key:{ref}%]")
         cur = cur[key]
+    if not isinstance(cur, str):
+        raise PatchError(f"translation reference is not a leaf string: [%key:{ref}%]")
     return cur
 
 
