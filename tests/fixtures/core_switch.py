@@ -33,8 +33,6 @@ class TeslaFleetSwitchEntityDescription(SwitchEntityDescription):
     scopes: list[Scope]
     value_func: Callable[[StateType], bool] = bool
     unique_id: str | None = None
-    assumed_state: bool = False
-    signing_required: bool = False
 
 
 VEHICLE_DESCRIPTIONS: tuple[TeslaFleetSwitchEntityDescription, ...] = (
@@ -90,22 +88,6 @@ VEHICLE_DESCRIPTIONS: tuple[TeslaFleetSwitchEntityDescription, ...] = (
         value_func=lambda state: state in {"Starting", "Charging"},
         scopes=[Scope.VEHICLE_CHARGING_CMDS, Scope.VEHICLE_CMDS],
     ),
-    TeslaFleetSwitchEntityDescription(
-        key="vehicle_state_low_power_mode",
-        on_func=lambda api: api.set_low_power_mode(on=True),
-        off_func=lambda api: api.set_low_power_mode(on=False),
-        scopes=[Scope.VEHICLE_CMDS],
-        assumed_state=True,
-        signing_required=True,
-    ),
-    TeslaFleetSwitchEntityDescription(
-        key="vehicle_state_keep_accessory_power_on",
-        on_func=lambda api: api.set_keep_accessory_power_mode(on=True),
-        off_func=lambda api: api.set_keep_accessory_power_mode(on=False),
-        scopes=[Scope.VEHICLE_CMDS],
-        assumed_state=True,
-        signing_required=True,
-    ),
 )
 
 
@@ -124,9 +106,6 @@ async def async_setup_entry(
                 )
                 for vehicle in entry.runtime_data.vehicles
                 for description in VEHICLE_DESCRIPTIONS
-                # Signed-only commands (low power / keep accessory power) are
-                # only offered on vehicles that require command signing.
-                if vehicle.signing or not description.signing_required
             ),
             (
                 TeslaFleetChargeFromGridSwitchEntity(
@@ -168,17 +147,12 @@ class TeslaFleetVehicleSwitchEntity(TeslaFleetVehicleEntity, TeslaFleetSwitchEnt
         super().__init__(data, description.key)
         if description.unique_id:
             self._attr_unique_id = f"{data.vin}-{description.unique_id}"
-        if description.assumed_state:
-            self._attr_assumed_state = True
 
     @override
     def _async_update_attrs(self) -> None:
         """Update the attributes of the sensor."""
         if self._value is None:
-            # For assumed_state entities, keep the last known commanded state
-            # rather than resetting to unknown, since the API doesn't report it.
-            if not self.entity_description.assumed_state:
-                self._attr_is_on = None
+            self._attr_is_on = None
         else:
             self._attr_is_on = self.entity_description.value_func(self._value)
 
