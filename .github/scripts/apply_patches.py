@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.request
 from pathlib import Path
@@ -43,16 +44,44 @@ class PatchError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
+DEFAULT_VERSION = "1.0.0"
+
+
+def _committed_manifest_version() -> str | None:
+    """Return the manifest ``version`` from the last commit, if any.
+
+    The upstream download overwrites manifest.json with core's copy (which has
+    no ``version``), so we recover the maintainer's released version from git
+    rather than resetting it — otherwise every sync would clobber the version
+    that the release workflow relies on.
+    """
+    rel = f"{COMPONENT_DIR.as_posix()}/manifest.json"
+    try:
+        out = subprocess.run(
+            ["git", "show", f"HEAD:{rel}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        return json.loads(out).get("version")
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return None
+
+
 def patch_manifest() -> None:
-    """Ensure manifest.json keeps the custom-component ``version`` field."""
+    """Ensure manifest.json keeps the custom-component ``version`` field.
+
+    Core's manifest has no ``version``; we re-add it after a sync, preserving
+    whatever version was previously committed (the release source of truth).
+    """
     path = COMPONENT_DIR / "manifest.json"
     manifest = json.loads(path.read_text())
-    if manifest.get("version") == "1.0.0":
-        print("manifest.json: version field already present")
+    if "version" in manifest:
+        print(f"manifest.json: version field already present ({manifest['version']})")
         return
-    manifest["version"] = "1.0.0"
+    manifest["version"] = _committed_manifest_version() or DEFAULT_VERSION
     path.write_text(json.dumps(manifest, indent=2) + "\n")
-    print("manifest.json: added version field")
+    print(f"manifest.json: restored version field ({manifest['version']})")
 
 
 # ---------------------------------------------------------------------------
