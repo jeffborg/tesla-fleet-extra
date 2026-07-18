@@ -6,27 +6,47 @@ tesla-fleet-api to be installed (see requirements_test.txt).
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
-from homeassistant.exceptions import HomeAssistantError
+from tesla_fleet_api.const import Scope
+from tesla_fleet_api.tesla.vehicle.commands import Commands
 
 from custom_components.tesla_fleet import switch
-from tesla_fleet_api.const import Scope
 
-CUSTOM_KEYS = (
-    "vehicle_state_low_power_mode",
-    "vehicle_state_keep_accessory_power_on",
-)
+# key -> library method name the switch drives
+CUSTOM_SWITCHES = {
+    "vehicle_state_low_power_mode": "set_low_power_mode",
+    "vehicle_state_keep_accessory_power_on": "set_keep_accessory_power_mode",
+}
 
 
 def _description(key: str):
     return next(d for d in switch.VEHICLE_DESCRIPTIONS if d.key == key)
 
 
-@pytest.mark.parametrize("key", CUSTOM_KEYS)
-def test_custom_switch_is_registered_as_assumed_state(key: str) -> None:
+@pytest.mark.parametrize("key", CUSTOM_SWITCHES)
+def test_custom_switch_is_assumed_state_and_signing_gated(key: str) -> None:
     description = _description(key)
     assert description.assumed_state is True
+    assert description.signing_required is True
     assert Scope.VEHICLE_CMDS in description.scopes
+
+
+def test_only_power_mode_switches_require_signing() -> None:
+    # The signing gate in async_setup_entry must apply to exactly the two
+    # signed-only switches and nothing else.
+    gated = {d.key for d in switch.VEHICLE_DESCRIPTIONS if d.signing_required}
+    assert gated == set(CUSTOM_SWITCHES)
+
+
+def test_non_signing_vehicle_excludes_power_mode_switches() -> None:
+    # Reproduces the async_setup_entry comprehension predicate for a vehicle
+    # that does not require command signing (vehicle.signing is False).
+    created = [
+        d.key for d in switch.VEHICLE_DESCRIPTIONS if not d.signing_required
+    ]
+    assert not (set(created) & set(CUSTOM_SWITCHES))
 
 
 class _FakeSignedApi:
@@ -36,30 +56,30 @@ class _FakeSignedApi:
         self.calls: list[tuple[str, bool]] = []
 
     async def set_low_power_mode(self, on: bool) -> dict:
-        self.calls.append(("low_power", on))
+        self.calls.append(("set_low_power_mode", on))
         return {"response": {"result": True}}
 
     async def set_keep_accessory_power_mode(self, on: bool) -> dict:
-        self.calls.append(("accessory", on))
+        self.calls.append(("set_keep_accessory_power_mode", on))
         return {"response": {"result": True}}
 
 
-async def test_low_power_on_calls_public_method() -> None:
+@pytest.mark.parametrize(("key", "method"), CUSTOM_SWITCHES.items())
+@pytest.mark.parametrize("turn_on", [True, False])
+async def test_switch_routes_to_public_method(
+    key: str, method: str, turn_on: bool
+) -> None:
     api = _FakeSignedApi()
-    result = await _description("vehicle_state_low_power_mode").on_func(api)
-    assert api.calls == [("low_power", True)]
+    description = _description(key)
+    func = description.on_func if turn_on else description.off_func
+    result = await func(api)
+    assert api.calls == [(method, turn_on)]
     assert result["response"]["result"] is True
 
 
-async def test_keep_accessory_off_calls_public_method() -> None:
-    api = _FakeSignedApi()
-    await _description("vehicle_state_keep_accessory_power_on").off_func(api)
-    assert api.calls == [("accessory", False)]
-
-
-async def test_unsigned_vehicle_raises_home_assistant_error() -> None:
-    class _UnsignedApi:
-        """A plain fleet api without signed power-mode commands."""
-
-    with pytest.raises(HomeAssistantError):
-        await switch._set_power_mode(_UnsignedApi(), "set_low_power_mode", True)
+@pytest.mark.parametrize("method", sorted(set(CUSTOM_SWITCHES.values())))
+def test_library_methods_accept_on_kwarg(method: str) -> None:
+    # Lock the contract the lambdas depend on: the real library methods are
+    # signed commands that take a single ``on`` argument.
+    params = inspect.signature(getattr(Commands, method)).parameters
+    assert list(params) == ["self", "on"]

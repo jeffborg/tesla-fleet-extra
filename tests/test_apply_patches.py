@@ -68,6 +68,9 @@ def test_reference_resolver(monkeypatch) -> None:
     )
     with pytest.raises(ap.PatchError):
         ap._resolve_str("[%key:bogus::x%]", self_strings)
+    # A reference to a missing key fails loudly as a PatchError, not KeyError.
+    with pytest.raises(ap.PatchError):
+        ap._resolve_str("[%key:common::state::nope%]", self_strings)
 
 
 def test_manifest_patch_adds_version_and_is_idempotent(tmp_path, monkeypatch) -> None:
@@ -95,6 +98,36 @@ def test_switch_patch_is_idempotent_on_shipped_file(tmp_path, monkeypatch) -> No
 
     ap.patch_switch()  # already customized -> no-op
     assert (comp / "switch.py").read_text() == shipped
+
+
+def test_switch_patch_reinjects_customizations(tmp_path, monkeypatch) -> None:
+    # Golden copy of HA core's pristine switch.py (no customizations). This is
+    # the whole point of the sync automation: re-add the switches afterwards.
+    comp = tmp_path / "tesla_fleet"
+    comp.mkdir()
+    pristine = (Path(__file__).parent / "fixtures" / "core_switch.py").read_text()
+    assert "vehicle_state_low_power_mode" not in pristine
+    (comp / "switch.py").write_text(pristine)
+    monkeypatch.setattr(ap, "COMPONENT_DIR", comp)
+
+    ap.patch_switch()
+    result = (comp / "switch.py").read_text()
+
+    # Every anchor the patcher targets must have landed.
+    assert "vehicle_state_low_power_mode" in result
+    assert "vehicle_state_keep_accessory_power_on" in result
+    assert "signing_required: bool = False" in result
+    assert "api.set_low_power_mode(on=True)" in result
+    assert "api.set_keep_accessory_power_mode(on=False)" in result
+    assert "if vehicle.signing or not description.signing_required" in result
+    assert "if description.assumed_state:" in result
+    assert "if not self.entity_description.assumed_state:" in result
+    # The result must be valid Python.
+    compile(result, "switch.py", "exec")
+
+    # And re-running the patcher is a no-op.
+    ap.patch_switch()
+    assert (comp / "switch.py").read_text() == result
 
 
 def test_switch_patch_fails_loudly_on_missing_anchor(tmp_path, monkeypatch) -> None:
