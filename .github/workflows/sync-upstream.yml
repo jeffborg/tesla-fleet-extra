@@ -31,7 +31,11 @@ jobs:
 
       - name: Resolve upstream ref
         id: ref
-        run: echo "ref=${{ github.event.inputs.upstream_ref || 'dev' }}" >> "$GITHUB_OUTPUT"
+        env:
+          # Bind the workflow input to an env var rather than interpolating it
+          # into the shell command, to avoid script injection.
+          RAW_REF: ${{ github.event.inputs.upstream_ref }}
+        run: echo "ref=${RAW_REF:-dev}" >> "$GITHUB_OUTPUT"
 
       - name: Download upstream component files
         env:
@@ -74,6 +78,7 @@ jobs:
         env:
           UPSTREAM_REF: ${{ steps.ref.outputs.ref }}
         run: |
+          set -euo pipefail
           SHA=$(curl -sSf \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/home-assistant/core/commits/${UPSTREAM_REF}" \
