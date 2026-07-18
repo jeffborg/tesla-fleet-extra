@@ -15,7 +15,6 @@ from homeassistant.components.switch import (
     SwitchEntityDescription,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
@@ -37,6 +36,7 @@ class TeslaFleetSwitchEntityDescription(SwitchEntityDescription):
     value_func: Callable[[StateType], bool] = bool
     unique_id: str | None = None
     assumed_state: bool = False
+    signing_required: bool = False
 
 
 VEHICLE_DESCRIPTIONS: tuple[TeslaFleetSwitchEntityDescription, ...] = (
@@ -94,38 +94,21 @@ VEHICLE_DESCRIPTIONS: tuple[TeslaFleetSwitchEntityDescription, ...] = (
     ),
     TeslaFleetSwitchEntityDescription(
         key="vehicle_state_low_power_mode",
-        on_func=lambda api: _set_power_mode(api, "set_low_power_mode", True),
-        off_func=lambda api: _set_power_mode(api, "set_low_power_mode", False),
+        on_func=lambda api: api.set_low_power_mode(on=True),
+        off_func=lambda api: api.set_low_power_mode(on=False),
         scopes=[Scope.VEHICLE_CMDS],
         assumed_state=True,
+        signing_required=True,
     ),
     TeslaFleetSwitchEntityDescription(
         key="vehicle_state_keep_accessory_power_on",
-        on_func=lambda api: _set_power_mode(api, "set_keep_accessory_power_mode", True),
-        off_func=lambda api: _set_power_mode(
-            api, "set_keep_accessory_power_mode", False
-        ),
+        on_func=lambda api: api.set_keep_accessory_power_mode(on=True),
+        off_func=lambda api: api.set_keep_accessory_power_mode(on=False),
         scopes=[Scope.VEHICLE_CMDS],
         assumed_state=True,
+        signing_required=True,
     ),
 )
-
-
-async def _set_power_mode(api: Any, command: str, on: bool) -> dict[str, Any]:
-    """Send a low power / keep accessory power command via the public API.
-
-    These are Vehicle Command Protocol (signed) commands, so the method is only
-    present when the vehicle requires command signing (``api`` is a
-    ``VehicleSigned``). Fail gracefully for vehicles that do not support them.
-    """
-    func = getattr(api, command, None)
-    if func is None:
-        raise HomeAssistantError(
-            "Keep accessory power and low power mode require the Vehicle"
-            " Command Protocol (signed commands), which this vehicle does"
-            " not support."
-        )
-    return await func(on=on)
 
 
 async def async_setup_entry(
@@ -143,6 +126,9 @@ async def async_setup_entry(
                 )
                 for vehicle in entry.runtime_data.vehicles
                 for description in VEHICLE_DESCRIPTIONS
+                # Signed-only commands (low power / keep accessory power) are
+                # only offered on vehicles that require command signing.
+                if vehicle.signing or not description.signing_required
             ),
             (
                 TeslaFleetChargeFromGridSwitchEntity(
