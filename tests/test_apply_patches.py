@@ -73,13 +73,17 @@ def test_reference_resolver(monkeypatch) -> None:
         ap._resolve_str("[%key:common::state::nope%]", self_strings)
 
 
-def test_manifest_patch_adds_version_and_is_idempotent(tmp_path, monkeypatch) -> None:
+def test_manifest_patch_adds_default_version_and_is_idempotent(
+    tmp_path, monkeypatch
+) -> None:
     comp = tmp_path / "tesla_fleet"
     comp.mkdir()
     (comp / "manifest.json").write_text(
         json.dumps({"domain": "tesla_fleet", "requirements": ["tesla-fleet-api==1.7.2"]})
     )
     monkeypatch.setattr(ap, "COMPONENT_DIR", comp)
+    # No previously-committed version -> falls back to the default.
+    monkeypatch.setattr(ap, "_committed_manifest_version", lambda: None)
 
     ap.patch_manifest()
     assert json.loads((comp / "manifest.json").read_text())["version"] == "1.0.0"
@@ -87,6 +91,20 @@ def test_manifest_patch_adds_version_and_is_idempotent(tmp_path, monkeypatch) ->
     once = (comp / "manifest.json").read_text()
     ap.patch_manifest()  # second run must not change anything
     assert (comp / "manifest.json").read_text() == once
+
+
+def test_manifest_patch_preserves_committed_version(tmp_path, monkeypatch) -> None:
+    # A sync must not reset a released version back to the default.
+    comp = tmp_path / "tesla_fleet"
+    comp.mkdir()
+    (comp / "manifest.json").write_text(
+        json.dumps({"domain": "tesla_fleet", "requirements": ["tesla-fleet-api==1.7.2"]})
+    )
+    monkeypatch.setattr(ap, "COMPONENT_DIR", comp)
+    monkeypatch.setattr(ap, "_committed_manifest_version", lambda: "1.4.2")
+
+    ap.patch_manifest()
+    assert json.loads((comp / "manifest.json").read_text())["version"] == "1.4.2"
 
 
 def test_switch_patch_is_idempotent_on_shipped_file(tmp_path, monkeypatch) -> None:
