@@ -11,8 +11,8 @@
   ],
   "documentation": "https://github.com/jeffborg/tesla-fleet-extra",
   "integration_type": "hub",
-  "issue_tracker": "https://github.com/jeffborg/tesla-fleet-extra/issues",
   "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/jeffborg/tesla-fleet-extra/issues",
   "loggers": [
     "tesla-fleet-api"
   ],
