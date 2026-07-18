@@ -94,67 +94,38 @@ VEHICLE_DESCRIPTIONS: tuple[TeslaFleetSwitchEntityDescription, ...] = (
     ),
     TeslaFleetSwitchEntityDescription(
         key="vehicle_state_low_power_mode",
-        on_func=lambda api: _send_power_mode_command(api, "low_power", True),
-        off_func=lambda api: _send_power_mode_command(api, "low_power", False),
+        on_func=lambda api: _set_power_mode(api, "set_low_power_mode", True),
+        off_func=lambda api: _set_power_mode(api, "set_low_power_mode", False),
         scopes=[Scope.VEHICLE_CMDS],
         assumed_state=True,
     ),
     TeslaFleetSwitchEntityDescription(
         key="vehicle_state_keep_accessory_power_on",
-        on_func=lambda api: _send_power_mode_command(api, "accessory", True),
-        off_func=lambda api: _send_power_mode_command(api, "accessory", False),
+        on_func=lambda api: _set_power_mode(api, "set_keep_accessory_power_mode", True),
+        off_func=lambda api: _set_power_mode(
+            api, "set_keep_accessory_power_mode", False
+        ),
         scopes=[Scope.VEHICLE_CMDS],
         assumed_state=True,
     ),
 )
 
 
-def _encode_varint(value: int) -> bytes:
-    """Encode an integer as a protobuf varint."""
-    result = b""
-    while value > 0x7F:
-        result += bytes([(value & 0x7F) | 0x80])
-        value >>= 7
-    return result + bytes([value])
+async def _set_power_mode(api: Any, command: str, on: bool) -> dict[str, Any]:
+    """Send a low power / keep accessory power command via the public API.
 
-
-def _build_power_mode_action(field_number: int, on: bool) -> bytes:
-    """Build a serialized protobuf Action for a power mode command.
-
-    Constructs the binary manually to avoid needing proto class definitions
-    that are not present in the released tesla-fleet-api package.
+    These are Vehicle Command Protocol (signed) commands, so the method is only
+    present when the vehicle requires command signing (``api`` is a
+    ``VehicleSigned``). Fail gracefully for vehicles that do not support them.
     """
-    # Inner message: single bool field at field number 1
-    inner = b"\x08\x01" if on else b""
-    # VehicleAction oneof: message field at field_number
-    va_tag = _encode_varint((field_number << 3) | 2)
-    va_payload = va_tag + _encode_varint(len(inner)) + inner
-    # Action.vehicleAction is field 2 (message)
-    return b"\x12" + _encode_varint(len(va_payload)) + va_payload
-
-
-async def _send_power_mode_command(api: Any, mode: str, on: bool) -> dict[str, Any]:
-    """Send a low power mode or keep accessory power mode signed command.
-
-    These commands are only available via the Vehicle Command Protocol (signed
-    protobuf), not the REST API. We build the raw protobuf bytes and send them
-    directly through the signed command path.
-    """
-    # VehicleAction field numbers from the Tesla car_server proto:
-    # setLowPowerModeAction = 130, setKeepAccessoryPowerModeAction = 138
-    field_number = 130 if mode == "low_power" else 138
-    payload = _build_power_mode_action(field_number, on)
-
-    if not hasattr(api, "_command"):
+    func = getattr(api, command, None)
+    if func is None:
         raise HomeAssistantError(
-            "Keep accessory power and low power mode commands require the"
-            " Vehicle Command Protocol (signed commands). Your vehicle or"
-            " account configuration does not support this."
+            "Keep accessory power and low power mode require the Vehicle"
+            " Command Protocol (signed commands), which this vehicle does"
+            " not support."
         )
-
-    # Domain.DOMAIN_INFOTAINMENT = 3 (avoids importing the protobuf-generated module,
-    # which pylint cannot inspect reliably)
-    return await api._command(3, payload)  # noqa: SLF001
+    return await func(on=on)
 
 
 async def async_setup_entry(
