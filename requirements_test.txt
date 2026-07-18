@@ -1,0 +1,7 @@
+# Test dependencies. homeassistant is unpinned so tests run against the same
+# recent core this component is synced to; tesla-fleet-api matches manifest.json.
+homeassistant
+tesla-fleet-api==1.7.2
+pytest
+pytest-asyncio
+ruff

@@ -1,0 +1,13 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+# A conservative-but-meaningful subset: pyflakes (real errors/unused),
+# bugbear, and pyupgrade. Kept stable so unverifiable formatting nits don't
+# break CI while still catching genuine issues.
+select = ["F", "B", "UP"]
