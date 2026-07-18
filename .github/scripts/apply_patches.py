@@ -1,0 +1,301 @@
+#!/usr/bin/env python3
+"""Re-apply this fork's customizations on top of freshly-synced HA core files.
+
+The upstream sync workflow downloads ``custom_components/tesla_fleet`` verbatim
+from ``home-assistant/core``. This script then re-adds the small set of changes
+that make this a custom component:
+
+* ``manifest.json`` — the ``version`` field custom components require.
+* ``switch.py`` — the two extra vehicle switches (low power mode / keep
+  accessory power) sent via the public ``tesla-fleet-api`` power-mode methods.
+* ``strings.json`` — the entity names for those two switches.
+* ``translations/en.json`` — regenerated from ``strings.json`` with all
+  ``[%key:...%]`` references resolved (HA core ships this via build tooling;
+  custom components must ship a resolved file themselves).
+
+The switch patches are string based and idempotent: re-running the script is a
+no-op once the customizations are present, and a missing anchor is reported
+loudly (and fails the run) so upstream refactors do not silently drop a switch.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+import urllib.request
+from pathlib import Path
+
+COMPONENT_DIR = Path("custom_components/tesla_fleet")
+UPSTREAM_REF = os.environ.get("UPSTREAM_REF", "dev")
+RAW_BASE = (
+    f"https://raw.githubusercontent.com/home-assistant/core/{UPSTREAM_REF}/homeassistant"
+)
+
+
+class PatchError(RuntimeError):
+    """Raised when an expected anchor is missing from an upstream file."""
+
+
+# ---------------------------------------------------------------------------
+# manifest.json
+# ---------------------------------------------------------------------------
+
+
+def patch_manifest() -> None:
+    """Ensure manifest.json keeps the custom-component ``version`` field."""
+    path = COMPONENT_DIR / "manifest.json"
+    manifest = json.loads(path.read_text())
+    if manifest.get("version") == "1.0.0":
+        print("manifest.json: version field already present")
+        return
+    manifest["version"] = "1.0.0"
+    path.write_text(json.dumps(manifest, indent=2) + "\n")
+    print("manifest.json: added version field")
+
+
+# ---------------------------------------------------------------------------
+# switch.py
+# ---------------------------------------------------------------------------
+
+SWITCH_IMPORT = "from homeassistant.exceptions import HomeAssistantError\n"
+
+SWITCH_ASSUMED_FIELD = "    assumed_state: bool = False\n"
+
+SWITCH_CUSTOM_DESCRIPTIONS = """\
+    TeslaFleetSwitchEntityDescription(
+        key="vehicle_state_low_power_mode",
+        on_func=lambda api: _set_power_mode(api, "set_low_power_mode", True),
+        off_func=lambda api: _set_power_mode(api, "set_low_power_mode", False),
+        scopes=[Scope.VEHICLE_CMDS],
+        assumed_state=True,
+    ),
+    TeslaFleetSwitchEntityDescription(
+        key="vehicle_state_keep_accessory_power_on",
+        on_func=lambda api: _set_power_mode(api, "set_keep_accessory_power_mode", True),
+        off_func=lambda api: _set_power_mode(
+            api, "set_keep_accessory_power_mode", False
+        ),
+        scopes=[Scope.VEHICLE_CMDS],
+        assumed_state=True,
+    ),
+"""
+
+SWITCH_HELPER = '''
+async def _set_power_mode(api: Any, command: str, on: bool) -> dict[str, Any]:
+    """Send a low power / keep accessory power command via the public API.
+
+    These are Vehicle Command Protocol (signed) commands, so the method is only
+    present when the vehicle requires command signing (``api`` is a
+    ``VehicleSigned``). Fail gracefully for vehicles that do not support them.
+    """
+    func = getattr(api, command, None)
+    if func is None:
+        raise HomeAssistantError(
+            "Keep accessory power and low power mode require the Vehicle"
+            " Command Protocol (signed commands), which this vehicle does"
+            " not support."
+        )
+    return await func(on=on)
+
+'''
+
+SWITCH_ASSUMED_INIT = """\
+        if description.assumed_state:
+            self._attr_assumed_state = True
+"""
+
+SWITCH_ASSUMED_UPDATE = """\
+        if self._value is None:
+            # For assumed_state entities, keep the last known commanded state
+            # rather than resetting to unknown, since the API doesn't report it.
+            if not self.entity_description.assumed_state:
+                self._attr_is_on = None
+"""
+
+
+def _replace_once(text: str, old: str, new: str, what: str) -> str:
+    """Replace ``old`` with ``new`` exactly once or raise PatchError."""
+    count = text.count(old)
+    if count != 1:
+        raise PatchError(
+            f"switch.py: expected exactly one anchor for {what!r}, found {count}"
+        )
+    return text.replace(old, new)
+
+
+def patch_switch() -> None:
+    """Re-add the low power / keep accessory power switch entities."""
+    path = COMPONENT_DIR / "switch.py"
+    text = path.read_text()
+
+    if "vehicle_state_low_power_mode" in text:
+        print("switch.py: customizations already present")
+        return
+
+    # 1. HomeAssistantError import (alphabetical: after ...core import HomeAssistant)
+    text = _replace_once(
+        text,
+        "from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback\n",
+        SWITCH_IMPORT
+        + "from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback\n",
+        "HomeAssistantError import",
+    )
+
+    # 2. assumed_state field on the entity description dataclass
+    text = _replace_once(
+        text,
+        "    unique_id: str | None = None\n",
+        "    unique_id: str | None = None\n" + SWITCH_ASSUMED_FIELD,
+        "assumed_state dataclass field",
+    )
+
+    # 3. Custom switch descriptions, appended to VEHICLE_DESCRIPTIONS
+    m = re.search(
+        r"scopes=\[Scope\.VEHICLE_CHARGING_CMDS,\s*Scope\.VEHICLE_CMDS\],\s*\n\s*\),\n\)",
+        text,
+    )
+    if not m:
+        raise PatchError("switch.py: could not find end of VEHICLE_DESCRIPTIONS")
+    closing = text.rindex(")", m.start(), m.end())
+    text = text[:closing] + SWITCH_CUSTOM_DESCRIPTIONS + text[closing:]
+
+    # 4. _set_power_mode helper, before async_setup_entry
+    text = _replace_once(
+        text,
+        "\nasync def async_setup_entry(\n",
+        SWITCH_HELPER + "\nasync def async_setup_entry(\n",
+        "async_setup_entry anchor",
+    )
+
+    # 5. assumed_state handling in the vehicle switch __init__
+    text = _replace_once(
+        text,
+        '            self._attr_unique_id = f"{data.vin}-{description.unique_id}"\n',
+        '            self._attr_unique_id = f"{data.vin}-{description.unique_id}"\n'
+        + SWITCH_ASSUMED_INIT,
+        "assumed_state __init__ handling",
+    )
+
+    # 6. Preserve assumed state in _async_update_attrs
+    text = _replace_once(
+        text,
+        "        if self._value is None:\n            self._attr_is_on = None\n",
+        SWITCH_ASSUMED_UPDATE,
+        "_async_update_attrs assumed_state handling",
+    )
+
+    path.write_text(text)
+    print("switch.py: re-applied custom switch entities")
+
+
+# ---------------------------------------------------------------------------
+# strings.json + translations/en.json
+# ---------------------------------------------------------------------------
+
+CUSTOM_SWITCH_NAMES = {
+    "vehicle_state_keep_accessory_power_on": {"name": "Keep accessory power on"},
+    "vehicle_state_low_power_mode": {"name": "Low power mode"},
+}
+
+
+def patch_strings() -> None:
+    """Add the custom switch entity names to strings.json (kept sorted)."""
+    path = COMPONENT_DIR / "strings.json"
+    data = json.loads(path.read_text())
+    switch = data.setdefault("entity", {}).setdefault("switch", {})
+    added = [k for k in CUSTOM_SWITCH_NAMES if k not in switch]
+    switch.update(CUSTOM_SWITCH_NAMES)
+    data["entity"]["switch"] = dict(sorted(switch.items()))
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    print(
+        "strings.json: "
+        + (f"added {', '.join(added)}" if added else "custom names already present")
+    )
+
+
+# --- reference resolution for translations/en.json -------------------------
+
+REF_RE = re.compile(r"\[%key:([^%]+)%\]")
+_strings_cache: dict[str, dict] = {}
+
+
+def _fetch_json(url: str) -> dict:
+    with urllib.request.urlopen(url) as resp:  # noqa: S310 - fixed github host
+        return json.loads(resp.read().decode())
+
+
+def _common_strings() -> dict:
+    if "__common__" not in _strings_cache:
+        _strings_cache["__common__"] = _fetch_json(f"{RAW_BASE}/strings.json").get(
+            "common", {}
+        )
+    return _strings_cache["__common__"]
+
+
+def _component_strings(name: str, self_strings: dict) -> dict:
+    if name == "tesla_fleet":
+        return self_strings
+    if name not in _strings_cache:
+        _strings_cache[name] = _fetch_json(
+            f"{RAW_BASE}/components/{name}/strings.json"
+        )
+    return _strings_cache[name]
+
+
+def _lookup(ref: str, self_strings: dict):
+    parts = ref.split("::")
+    if parts[0] == "common":
+        base, path = _common_strings(), parts[1:]
+    elif parts[0] == "component":
+        base, path = _component_strings(parts[1], self_strings), parts[2:]
+    else:
+        raise PatchError(f"unknown translation reference namespace: {ref}")
+    cur = base
+    for key in path:
+        cur = cur[key]
+    return cur
+
+
+def _resolve_str(value: str, self_strings: dict, depth: int = 0) -> str:
+    if depth > 25:
+        raise PatchError(f"translation reference nested too deeply: {value}")
+    while (m := REF_RE.search(value)) is not None:
+        target = _resolve_str(_lookup(m.group(1), self_strings), self_strings, depth + 1)
+        value = value[: m.start()] + target + value[m.end() :]
+    return value
+
+
+def _resolve_tree(node, self_strings):
+    if isinstance(node, dict):
+        return {k: _resolve_tree(v, self_strings) for k, v in node.items()}
+    if isinstance(node, str):
+        return _resolve_str(node, self_strings)
+    return node
+
+
+def generate_en_json() -> None:
+    """Regenerate translations/en.json from strings.json with refs resolved."""
+    strings = json.loads((COMPONENT_DIR / "strings.json").read_text())
+    resolved = _resolve_tree(strings, strings)
+    path = COMPONENT_DIR / "translations" / "en.json"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(resolved, indent=4, ensure_ascii=False) + "\n")
+    print("translations/en.json: regenerated from strings.json")
+
+
+def main() -> None:
+    """Apply all patches."""
+    if not COMPONENT_DIR.exists():
+        print(f"ERROR: {COMPONENT_DIR} does not exist", file=sys.stderr)
+        sys.exit(1)
+    patch_manifest()
+    patch_switch()
+    patch_strings()
+    generate_en_json()
+    print("All patches applied successfully.")
+
+
+if __name__ == "__main__":
+    main()

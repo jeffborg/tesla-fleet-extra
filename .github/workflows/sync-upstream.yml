@@ -1,0 +1,101 @@
+name: Sync from HA Core upstream
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Upstream HA core git ref to sync from (branch, tag, or SHA)"
+        required: false
+        default: "dev"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    name: Sync tesla_fleet from HA core
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Resolve upstream ref
+        id: ref
+        run: echo "ref=${{ github.event.inputs.upstream_ref || 'dev' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Download upstream component files
+        env:
+          UPSTREAM_REF: ${{ steps.ref.outputs.ref }}
+          UPSTREAM_PATH: homeassistant/components/tesla_fleet
+          LOCAL_PATH: custom_components/tesla_fleet
+        run: |
+          set -euo pipefail
+          BASE_URL="https://raw.githubusercontent.com/home-assistant/core/${UPSTREAM_REF}/${UPSTREAM_PATH}"
+
+          # Fetch the directory listing via the GitHub API.
+          curl -sSf \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/home-assistant/core/contents/${UPSTREAM_PATH}?ref=${UPSTREAM_REF}" \
+            > listing.json
+
+          # Download every top-level file. The translations/ subdirectory is
+          # intentionally excluded: HA core generates per-locale files from
+          # strings.json at build time, whereas a custom component must ship a
+          # resolved translations/en.json. apply_patches.py regenerates it.
+          for name in $(jq -r '.[] | select(.type == "file") | .name' listing.json); do
+            echo "  downloading ${name}"
+            curl -sSf "${BASE_URL}/${name}" -o "${LOCAL_PATH}/${name}"
+          done
+          rm -f listing.json
+
+      - name: Re-apply local customizations
+        env:
+          UPSTREAM_REF: ${{ steps.ref.outputs.ref }}
+        run: python3 .github/scripts/apply_patches.py
+
+      - name: Detect changes
+        id: changes
+        run: |
+          git diff --quiet && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Get upstream commit SHA
+        if: steps.changes.outputs.changed == 'true'
+        id: upstream_sha
+        env:
+          UPSTREAM_REF: ${{ steps.ref.outputs.ref }}
+        run: |
+          SHA=$(curl -sSf \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/home-assistant/core/commits/${UPSTREAM_REF}" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['sha'][:7])")
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        if: steps.changes.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: "sync/ha-core-${{ steps.upstream_sha.outputs.sha }}"
+          delete-branch: true
+          commit-message: "Sync tesla_fleet from HA core (${{ steps.upstream_sha.outputs.sha }})"
+          title: "Sync tesla_fleet from HA core (${{ steps.upstream_sha.outputs.sha }})"
+          body: |
+            Automated sync of `custom_components/tesla_fleet` from
+            [home-assistant/core](https://github.com/home-assistant/core) `${{ steps.ref.outputs.ref }}` @ `${{ steps.upstream_sha.outputs.sha }}`.
+
+            Local customizations (low power mode / keep accessory power switches,
+            manifest version, resolved `translations/en.json`) were re-applied by
+            `.github/scripts/apply_patches.py`.
+
+            Please review the diff before merging.
+          labels: "upstream-sync"
