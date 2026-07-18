@@ -45,6 +45,7 @@ class PatchError(RuntimeError):
 
 
 DEFAULT_VERSION = "1.0.0"
+FORK_URL = "https://github.com/jeffborg/tesla-fleet-extra"
 
 
 def _committed_manifest_version() -> str | None:
@@ -69,19 +70,39 @@ def _committed_manifest_version() -> str | None:
 
 
 def patch_manifest() -> None:
-    """Ensure manifest.json keeps the custom-component ``version`` field.
+    """Re-apply the fork's manifest fields after an upstream overwrite.
 
-    Core's manifest has no ``version``; we re-add it after a sync, preserving
-    whatever version was previously committed (the release source of truth).
+    Core's manifest points ``documentation`` at home-assistant.io, has no
+    ``issue_tracker`` and no ``version``. hassfest (custom mode) requires a
+    custom documentation URL, HACS requires an issue tracker, and custom
+    components need a version — so re-add all three, preserving whatever
+    version was previously committed (the release source of truth).
     """
     path = COMPONENT_DIR / "manifest.json"
     manifest = json.loads(path.read_text())
-    if "version" in manifest:
-        print(f"manifest.json: version field already present ({manifest['version']})")
+
+    changed = False
+    fork_fields = {
+        "documentation": FORK_URL,
+        "issue_tracker": f"{FORK_URL}/issues",
+    }
+    for key, value in fork_fields.items():
+        if manifest.get(key) != value:
+            manifest[key] = value
+            changed = True
+    if "version" not in manifest:
+        manifest["version"] = _committed_manifest_version() or DEFAULT_VERSION
+        changed = True
+
+    if not changed:
+        print("manifest.json: fork fields already present")
         return
-    manifest["version"] = _committed_manifest_version() or DEFAULT_VERSION
-    path.write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"manifest.json: restored version field ({manifest['version']})")
+
+    # Canonical hassfest key order: domain and name first, then the rest sorted.
+    ordered = {k: manifest.pop(k) for k in ("domain", "name") if k in manifest}
+    ordered.update({k: manifest[k] for k in sorted(manifest)})
+    path.write_text(json.dumps(ordered, indent=2) + "\n")
+    print(f"manifest.json: applied fork fields (version {ordered.get('version')})")
 
 
 # ---------------------------------------------------------------------------
