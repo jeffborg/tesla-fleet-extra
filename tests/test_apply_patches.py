@@ -107,6 +107,34 @@ def test_manifest_patch_preserves_committed_version(tmp_path, monkeypatch) -> No
     assert json.loads((comp / "manifest.json").read_text())["version"] == "1.4.2"
 
 
+def test_manifest_patch_applies_fork_fields(tmp_path, monkeypatch) -> None:
+    # documentation must be a custom URL (hassfest) and issue_tracker present
+    # (HACS); both must survive an upstream overwrite.
+    comp = tmp_path / "tesla_fleet"
+    comp.mkdir()
+    (comp / "manifest.json").write_text(
+        json.dumps(
+            {
+                "domain": "tesla_fleet",
+                "name": "Tesla Fleet",
+                "documentation": "https://www.home-assistant.io/integrations/tesla_fleet",
+                "requirements": ["tesla-fleet-api==1.7.2"],
+            }
+        )
+    )
+    monkeypatch.setattr(ap, "COMPONENT_DIR", comp)
+    monkeypatch.setattr(ap, "_committed_manifest_version", lambda: None)
+
+    ap.patch_manifest()
+    data = json.loads((comp / "manifest.json").read_text())
+    assert data["documentation"] == ap.FORK_URL
+    assert data["issue_tracker"] == f"{ap.FORK_URL}/issues"
+    # domain/name first, then the remaining keys in sorted order.
+    keys = list(data)
+    assert keys[:2] == ["domain", "name"]
+    assert keys[2:] == sorted(keys[2:])
+
+
 def test_switch_patch_is_idempotent_on_shipped_file(tmp_path, monkeypatch) -> None:
     comp = tmp_path / "tesla_fleet"
     comp.mkdir()
