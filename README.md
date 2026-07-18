@@ -38,9 +38,9 @@ Releases are created automatically by GitHub Actions when a version tag is pushe
 3. Tag and push:
    ```bash
    git tag v1.0.1
-   git push origin main --tags
+   git push origin master --tags
    ```
 
-GitHub Actions will validate that the tag matches the manifest version, package the integration into a zip, and publish a GitHub Release with auto-generated release notes.
+GitHub Actions will validate that the tag matches the manifest version and publish a GitHub Release with auto-generated release notes. HACS installs the integration from the repository source at the tag.
 
 > **Note:** If the tag version and manifest version do not match, the release workflow will fail before creating any release.

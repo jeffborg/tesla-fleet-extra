@@ -24,13 +24,9 @@ jobs:
             exit 1
           fi
 
-      - name: Create release zip
-        run: |
-          cd custom_components
-          zip -r ../tesla_fleet.zip tesla_fleet
-
       - name: Create GitHub Release
+        # HACS installs the integration from the repository source at the tag
+        # (hacs.json has content_in_root=false), so no zip asset is needed.
         uses: softprops/action-gh-release@v2
         with:
-          files: tesla_fleet.zip
           generate_release_notes: true
