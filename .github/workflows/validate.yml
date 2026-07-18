@@ -1,0 +1,37 @@
+name: Validate
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  validate-hacs:
+    name: Validate HACS
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: HACS validation
+        uses: hacs/action@22.5.0
+        with:
+          category: integration
+          # This fork overrides a built-in integration and is installed as a
+          # custom repository, so its brand assets live in HA core, not here.
+          ignore: brands
+
+  validate-hassfest:
+    name: Validate with hassfest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: hassfest validation
+        uses: home-assistant/actions/hassfest@master
