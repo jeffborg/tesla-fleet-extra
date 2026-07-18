@@ -4,7 +4,7 @@ asyncio_mode = "auto"
 pythonpath = ["."]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 # A conservative-but-meaningful subset: pyflakes (real errors/unused),

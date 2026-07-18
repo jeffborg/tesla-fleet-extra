@@ -19,7 +19,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          # homeassistant 2026.7 requires Python >= 3.14.
+          python-version: "3.14"
           cache: pip
 
       - name: Install test dependencies
