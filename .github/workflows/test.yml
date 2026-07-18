@@ -1,0 +1,36 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # homeassistant 2026.7 requires Python >= 3.14.
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install test dependencies
+        run: pip install -r requirements_test.txt
+
+      - name: Lint
+        # Lint our own code: the tests, the sync script, and switch.py (the one
+        # component file the fork authors). The rest of custom_components is a
+        # verbatim copy of HA core and is linted upstream.
+        run: ruff check tests .github/scripts custom_components/tesla_fleet/switch.py
+
+      - name: Run tests
+        run: pytest -q

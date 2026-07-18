@@ -1,0 +1,8 @@
+# Test dependencies. homeassistant is pinned for reproducible CI — bump it to
+# match the core release the component is synced to (see apply_patches.py /
+# sync-upstream.yml). tesla-fleet-api matches manifest.json.
+homeassistant==2026.7.2
+tesla-fleet-api==1.7.2
+pytest==9.1.1
+pytest-asyncio==1.4.0
+ruff==0.15.22
