@@ -35,7 +35,15 @@ jobs:
           # Bind the workflow input to an env var rather than interpolating it
           # into the shell command, to avoid script injection.
           RAW_REF: ${{ github.event.inputs.upstream_ref }}
-        run: echo "ref=${RAW_REF:-dev}" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          REF="${RAW_REF:-dev}"
+          # Validate: a git ref cannot contain shell metacharacters or newlines.
+          if [[ ! "$REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Invalid upstream ref: $REF"
+            exit 1
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
       - name: Download upstream component files
         env:
@@ -70,7 +78,13 @@ jobs:
       - name: Detect changes
         id: changes
         run: |
-          git diff --quiet && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
+          # Use porcelain so newly-added upstream files (untracked) also count,
+          # not just modifications to tracked files.
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Get upstream commit SHA
         if: steps.changes.outputs.changed == 'true'
