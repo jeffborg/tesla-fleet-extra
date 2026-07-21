@@ -2,7 +2,7 @@
 
 These two settings are not present in the Fleet API's JSON ``vehicle_data``.
 They *are* in the base64-encoded protobuf snapshot Tesla returns when the
-``vehicle_data_only`` endpoint is requested (the same blob the mobile app
+``vehicle_data_combo`` endpoint is requested (the same blob the mobile app
 reads). Within that ``CarServer.VehicleData`` message:
 
 * ``charge_state`` (top-level field 3) → field 191 = low power mode (bool)
@@ -22,10 +22,12 @@ from __future__ import annotations
 import base64
 import binascii
 
-# Endpoint that makes the Fleet API include the base64 protobuf snapshot
-# alongside the usual JSON. Passed as a raw string (the library's
-# VehicleDataEndpoint enum does not define it).
-POWER_MODE_ENDPOINT = "vehicle_data_only"
+# Endpoint that returns the JSON sections AND a base64 protobuf snapshot in one
+# request (unlike ``vehicle_data_only``, which returns the protobuf *instead of*
+# the JSON and would break every JSON-backed entity). Equivalent to
+# VehicleDataEndpoint.VEHICLE_DATA_COMBO; kept as a plain string so this module
+# stays dependency-free.
+POWER_MODE_ENDPOINT = "vehicle_data_combo"
 
 _CHARGE_STATE_FIELD = 3
 _LOW_POWER_MODE_FIELD = 191

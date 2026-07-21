@@ -39,7 +39,7 @@ The only intentional differences from HA core's `tesla_fleet` are:
    components) and pins `tesla-fleet-api` to the same release HA core pins.
 3. **`strings.json` / `translations/en.json` / `icons.json`** — entries for the
    two extra switches.
-4. **`coordinator.py`** — requests the `vehicle_data_only` endpoint and merges
+4. **`coordinator.py`** — requests the `vehicle_data_combo` endpoint and merges
    the decoded low-power / keep-accessory-power state (from `power_mode.py`)
    into the coordinator data, so the two switches show **real** state.
 5. **`power_mode.py`** — fork-only module (no core equivalent). Decodes the

@@ -245,7 +245,7 @@ COORD_ENDPOINTS_NEW = """\
                 # retry (avoids doubling API calls, e.g. while rate limited).
                 raise
             except TeslaFleetError:
-                # Only an unexpected error (e.g. the vehicle_data_only endpoint
+                # Only an unexpected error (e.g. the vehicle_data_combo endpoint
                 # being rejected) reaches here; retry without it so power-mode
                 # state is the only thing lost, not the whole coordinator.
                 response = await self.api.vehicle_data(endpoints=self.endpoints)
@@ -258,7 +258,7 @@ COORD_RETURN_NEW = """\
                     self.update_interval = VEHICLE_WAIT
 
         # Low power / keep accessory power live only in the protobuf snapshot
-        # (vehicle_data_only endpoint), not the JSON. Decode and merge them in.
+        # (vehicle_data_combo endpoint), not the JSON. Decode and merge them in.
         vehicle_data_pb = data.pop("vehicle_data", None)
         result = flatten(data)
         result.update(decode_power_modes(vehicle_data_pb))
@@ -269,7 +269,7 @@ COORD_RETURN_NEW = """\
 def patch_coordinator() -> None:
     """Read low power / keep accessory power from the vehicle_data protobuf.
 
-    Requests the vehicle_data_only endpoint and merges the decoded booleans
+    Requests the vehicle_data_combo endpoint and merges the decoded booleans
     (from the fork-only power_mode module) into the coordinator data.
     """
     path = COMPONENT_DIR / "coordinator.py"
@@ -279,7 +279,7 @@ def patch_coordinator() -> None:
         return
     text = _replace_once(text, COORD_IMPORT, COORD_IMPORT_NEW, "power_mode import")
     text = _replace_once(
-        text, COORD_ENDPOINTS_OLD, COORD_ENDPOINTS_NEW, "vehicle_data_only endpoint"
+        text, COORD_ENDPOINTS_OLD, COORD_ENDPOINTS_NEW, "vehicle_data_combo endpoint"
     )
     text = _replace_once(
         text, COORD_RETURN_OLD, COORD_RETURN_NEW, "power-mode decode"
