@@ -151,6 +151,16 @@ def test_tracker_updates_when_no_timestamp() -> None:
     assert tracker.update(_make(low=0), 0) == {"vehicle_state_low_power_mode": False}
 
 
+def test_tracker_zero_timestamp_keeps_watermark() -> None:
+    # A missing-timestamp read updates the value but must NOT lower the
+    # watermark, or a later stale (older nonzero) read could slip through.
+    tracker = pm.PowerModeTracker()
+    tracker.update(_make(low=0), 200)  # watermark 200
+    tracker.update(_make(low=1), 0)  # value flips, watermark stays 200
+    # Stale read (older ts) is still rejected.
+    assert tracker.update(_make(low=0), 150) == {"vehicle_state_low_power_mode": True}
+
+
 def test_coordinator_merge_contract() -> None:
     # Mirrors what coordinator._async_update_data does: pop the protobuf, decode
     # it, and merge the booleans into the (flattened) result dict.

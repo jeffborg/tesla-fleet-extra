@@ -235,7 +235,7 @@ def test_coordinator_patch_adds_power_mode_reading(tmp_path, monkeypatch) -> Non
     assert "self.power_modes = PowerModeTracker()" in result
     assert "endpoints=[*self.endpoints, POWER_MODE_ENDPOINT]" in result
     assert 'data.pop("vehicle_data", None)' in result
-    assert 'timestamp = int(result.get("charge_state_timestamp") or 0)' in result
+    assert 'timestamp = result.get("charge_state_timestamp")' in result
     assert "self.power_modes.update(vehicle_data_pb, timestamp)" in result
 
     # Re-running is a no-op.

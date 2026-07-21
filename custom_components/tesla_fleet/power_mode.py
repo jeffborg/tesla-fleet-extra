@@ -112,7 +112,9 @@ class PowerModeTracker:
             decoded = decode_power_modes(vehicle_data_b64)
             if decoded:
                 self._values = decoded
-                self._timestamp = timestamp
+                # Keep the watermark monotonic so a missing (0) timestamp never
+                # lowers it and lets a later stale read through.
+                self._timestamp = max(self._timestamp, timestamp)
         return dict(self._values)
 
 

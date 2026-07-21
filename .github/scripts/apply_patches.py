@@ -287,7 +287,8 @@ COORD_RETURN_NEW = """\
         # charge_state with a stale timestamp that must not flip the switches.
         vehicle_data_pb = data.pop("vehicle_data", None)
         result = flatten(data)
-        timestamp = int(result.get("charge_state_timestamp") or 0)
+        timestamp = result.get("charge_state_timestamp")
+        timestamp = timestamp if isinstance(timestamp, int) else 0
         result.update(self.power_modes.update(vehicle_data_pb, timestamp))
         return result
 """
