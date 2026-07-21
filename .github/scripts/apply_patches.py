@@ -222,6 +222,63 @@ def patch_switch() -> None:
 
 
 # ---------------------------------------------------------------------------
+# coordinator.py
+# ---------------------------------------------------------------------------
+
+COORD_IMPORT = (
+    "from .const import DOMAIN, ENERGY_HISTORY_FIELDS, LOGGER, TeslaFleetState\n"
+)
+COORD_IMPORT_NEW = (
+    COORD_IMPORT + "from .power_mode import POWER_MODE_ENDPOINT, decode_power_modes\n"
+)
+
+COORD_ENDPOINTS_OLD = (
+    "            response = await self.api.vehicle_data(endpoints=self.endpoints)\n"
+)
+COORD_ENDPOINTS_NEW = """\
+            response = await self.api.vehicle_data(
+                endpoints=[*self.endpoints, POWER_MODE_ENDPOINT]
+            )
+"""
+
+COORD_RETURN_OLD = (
+    "                    self.update_interval = VEHICLE_WAIT\n\n        return flatten(data)\n"
+)
+COORD_RETURN_NEW = """\
+                    self.update_interval = VEHICLE_WAIT
+
+        # Low power / keep accessory power live only in the protobuf snapshot
+        # (vehicle_data_only endpoint), not the JSON. Decode and merge them in.
+        vehicle_data_pb = data.pop("vehicle_data", None)
+        result = flatten(data)
+        result.update(decode_power_modes(vehicle_data_pb))
+        return result
+"""
+
+
+def patch_coordinator() -> None:
+    """Read low power / keep accessory power from the vehicle_data protobuf.
+
+    Requests the vehicle_data_only endpoint and merges the decoded booleans
+    (from the fork-only power_mode module) into the coordinator data.
+    """
+    path = COMPONENT_DIR / "coordinator.py"
+    text = path.read_text()
+    if "from .power_mode import" in text:
+        print("coordinator.py: customizations already present")
+        return
+    text = _replace_once(text, COORD_IMPORT, COORD_IMPORT_NEW, "power_mode import")
+    text = _replace_once(
+        text, COORD_ENDPOINTS_OLD, COORD_ENDPOINTS_NEW, "vehicle_data_only endpoint"
+    )
+    text = _replace_once(
+        text, COORD_RETURN_OLD, COORD_RETURN_NEW, "power-mode decode"
+    )
+    path.write_text(text)
+    print("coordinator.py: re-applied power-mode reading")
+
+
+# ---------------------------------------------------------------------------
 # strings.json + translations/en.json
 # ---------------------------------------------------------------------------
 
@@ -327,6 +384,7 @@ def main() -> None:
         sys.exit(1)
     patch_manifest()
     patch_switch()
+    patch_coordinator()
     patch_strings()
     generate_en_json()
     print("All patches applied successfully.")

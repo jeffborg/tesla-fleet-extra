@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, ENERGY_HISTORY_FIELDS, LOGGER, TeslaFleetState
+from .power_mode import POWER_MODE_ENDPOINT, decode_power_modes
 
 VEHICLE_INTERVAL_SECONDS = 600
 VEHICLE_INTERVAL = timedelta(seconds=VEHICLE_INTERVAL_SECONDS)
@@ -153,7 +154,9 @@ class TeslaFleetVehicleDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self.data["state"] != TeslaFleetState.ONLINE:
                 return self.data
 
-            response = await self.api.vehicle_data(endpoints=self.endpoints)
+            response = await self.api.vehicle_data(
+                endpoints=[*self.endpoints, POWER_MODE_ENDPOINT]
+            )
             data = response["response"]
 
         except VehicleOffline:
@@ -195,7 +198,12 @@ class TeslaFleetVehicleDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # Let vehicle go to sleep now
                     self.update_interval = VEHICLE_WAIT
 
-        return flatten(data)
+        # Low power / keep accessory power live only in the protobuf snapshot
+        # (vehicle_data_only endpoint), not the JSON. Decode and merge them in.
+        vehicle_data_pb = data.pop("vehicle_data", None)
+        result = flatten(data)
+        result.update(decode_power_modes(vehicle_data_pb))
+        return result
 
 
 class TeslaFleetEnergySiteLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
