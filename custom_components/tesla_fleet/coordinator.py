@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, ENERGY_HISTORY_FIELDS, LOGGER, TeslaFleetState
-from .power_mode import POWER_MODE_ENDPOINT, decode_power_modes
+from .power_mode import POWER_MODE_ENDPOINT, PowerModeTracker
 
 VEHICLE_INTERVAL_SECONDS = 600
 VEHICLE_INTERVAL = timedelta(seconds=VEHICLE_INTERVAL_SECONDS)
@@ -134,6 +134,7 @@ class TeslaFleetVehicleDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.api = api
         self.data = flatten(product)
+        self.power_modes = PowerModeTracker()
         self.updated_once = False
         self.last_active = datetime.now()  # pylint: disable=home-assistant-enforce-naive-now
         self.endpoints = (
@@ -215,10 +216,14 @@ class TeslaFleetVehicleDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.update_interval = VEHICLE_WAIT
 
         # Low power / keep accessory power live only in the protobuf snapshot
-        # (vehicle_data_combo endpoint), not the JSON. Decode and merge them in.
+        # (vehicle_data_combo endpoint), not the JSON. Merge in the decoded
+        # state, but only from a fresh capture: an asleep car returns a cached
+        # charge_state with a stale timestamp that must not flip the switches.
         vehicle_data_pb = data.pop("vehicle_data", None)
         result = flatten(data)
-        result.update(decode_power_modes(vehicle_data_pb))
+        timestamp = result.get("charge_state_timestamp")
+        timestamp = timestamp if isinstance(timestamp, int) else 0
+        result.update(self.power_modes.update(vehicle_data_pb, timestamp))
         return result
 
 

@@ -108,6 +108,59 @@ def test_power_field_with_wrong_wire_type_is_ignored() -> None:
     assert pm.decode_power_modes(base64.b64encode(blob).decode()) == {}
 
 
+def test_tracker_updates_on_fresh_capture_only() -> None:
+    tracker = pm.PowerModeTracker()
+    on = _make(low=1, keep=1)
+    off = _make(low=0, keep=0)
+
+    # First capture (ts=100) is trusted.
+    assert tracker.update(on, 100) == {
+        "vehicle_state_low_power_mode": True,
+        "vehicle_state_keep_accessory_power_on": True,
+    }
+    # A newer capture (ts=200) with the settings off updates the state.
+    assert tracker.update(off, 200) == {
+        "vehicle_state_low_power_mode": False,
+        "vehicle_state_keep_accessory_power_on": False,
+    }
+    # A STALE/cached read (older ts) must NOT flip the switches back.
+    assert tracker.update(on, 150) == {
+        "vehicle_state_low_power_mode": False,
+        "vehicle_state_keep_accessory_power_on": False,
+    }
+    # Same timestamp (repeated cached read) also holds.
+    assert tracker.update(on, 200) == {
+        "vehicle_state_low_power_mode": False,
+        "vehicle_state_keep_accessory_power_on": False,
+    }
+
+
+def test_tracker_holds_last_value_when_data_absent() -> None:
+    tracker = pm.PowerModeTracker()
+    tracker.update(_make(low=1), 100)
+    # No protobuf this cycle (e.g. decode gap) -> keep last known.
+    assert tracker.update(None, 200) == {"vehicle_state_low_power_mode": True}
+    # A newer capture still updates.
+    assert tracker.update(_make(low=0), 300) == {"vehicle_state_low_power_mode": False}
+
+
+def test_tracker_updates_when_no_timestamp() -> None:
+    # timestamp==0 (missing) should still update rather than get stuck.
+    tracker = pm.PowerModeTracker()
+    assert tracker.update(_make(low=1), 0) == {"vehicle_state_low_power_mode": True}
+    assert tracker.update(_make(low=0), 0) == {"vehicle_state_low_power_mode": False}
+
+
+def test_tracker_zero_timestamp_keeps_watermark() -> None:
+    # A missing-timestamp read updates the value but must NOT lower the
+    # watermark, or a later stale (older nonzero) read could slip through.
+    tracker = pm.PowerModeTracker()
+    tracker.update(_make(low=0), 200)  # watermark 200
+    tracker.update(_make(low=1), 0)  # value flips, watermark stays 200
+    # Stale read (older ts) is still rejected.
+    assert tracker.update(_make(low=0), 150) == {"vehicle_state_low_power_mode": True}
+
+
 def test_coordinator_merge_contract() -> None:
     # Mirrors what coordinator._async_update_data does: pop the protobuf, decode
     # it, and merge the booleans into the (flattened) result dict.

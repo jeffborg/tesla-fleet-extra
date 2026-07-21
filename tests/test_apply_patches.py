@@ -200,6 +200,13 @@ CORE_COORDINATOR = (
     "from .const import DOMAIN, ENERGY_HISTORY_FIELDS, LOGGER, TeslaFleetState\n"
     "\n\n"
     "class TeslaFleetVehicleDataCoordinator:\n"
+    "    def __init__(self):\n"
+    "        self.api = api\n"
+    "        self.data = flatten(product)\n"
+    "        self.updated_once = False\n"
+    "        self.last_active = datetime.now()"
+    "  # pylint: disable=home-assistant-enforce-naive-now\n"
+    "\n"
     "    async def _async_update_data(self):\n"
     "        try:\n"
     "            response = await self.api.vehicle_data(endpoints=self.endpoints)\n"
@@ -224,10 +231,12 @@ def test_coordinator_patch_adds_power_mode_reading(tmp_path, monkeypatch) -> Non
     ap.patch_coordinator()
     result = (comp / "coordinator.py").read_text()
 
-    assert "from .power_mode import POWER_MODE_ENDPOINT, decode_power_modes" in result
+    assert "from .power_mode import POWER_MODE_ENDPOINT, PowerModeTracker" in result
+    assert "self.power_modes = PowerModeTracker()" in result
     assert "endpoints=[*self.endpoints, POWER_MODE_ENDPOINT]" in result
     assert 'data.pop("vehicle_data", None)' in result
-    assert "decode_power_modes(vehicle_data_pb)" in result
+    assert 'timestamp = result.get("charge_state_timestamp")' in result
+    assert "self.power_modes.update(vehicle_data_pb, timestamp)" in result
 
     # Re-running is a no-op.
     ap.patch_coordinator()

@@ -233,7 +233,21 @@ COORD_IMPORT = (
     "from .const import DOMAIN, ENERGY_HISTORY_FIELDS, LOGGER, TeslaFleetState\n"
 )
 COORD_IMPORT_NEW = (
-    COORD_IMPORT + "from .power_mode import POWER_MODE_ENDPOINT, decode_power_modes\n"
+    COORD_IMPORT + "from .power_mode import POWER_MODE_ENDPOINT, PowerModeTracker\n"
+)
+
+COORD_INIT_OLD = (
+    "        self.data = flatten(product)\n"
+    "        self.updated_once = False\n"
+    "        self.last_active = datetime.now()"
+    "  # pylint: disable=home-assistant-enforce-naive-now\n"
+)
+COORD_INIT_NEW = (
+    "        self.data = flatten(product)\n"
+    "        self.power_modes = PowerModeTracker()\n"
+    "        self.updated_once = False\n"
+    "        self.last_active = datetime.now()"
+    "  # pylint: disable=home-assistant-enforce-naive-now\n"
 )
 
 COORD_ENDPOINTS_OLD = (
@@ -268,10 +282,14 @@ COORD_RETURN_NEW = """\
                     self.update_interval = VEHICLE_WAIT
 
         # Low power / keep accessory power live only in the protobuf snapshot
-        # (vehicle_data_combo endpoint), not the JSON. Decode and merge them in.
+        # (vehicle_data_combo endpoint), not the JSON. Merge in the decoded
+        # state, but only from a fresh capture: an asleep car returns a cached
+        # charge_state with a stale timestamp that must not flip the switches.
         vehicle_data_pb = data.pop("vehicle_data", None)
         result = flatten(data)
-        result.update(decode_power_modes(vehicle_data_pb))
+        timestamp = result.get("charge_state_timestamp")
+        timestamp = timestamp if isinstance(timestamp, int) else 0
+        result.update(self.power_modes.update(vehicle_data_pb, timestamp))
         return result
 """
 
@@ -288,6 +306,7 @@ def patch_coordinator() -> None:
         print("coordinator.py: customizations already present")
         return
     text = _replace_once(text, COORD_IMPORT, COORD_IMPORT_NEW, "power_mode import")
+    text = _replace_once(text, COORD_INIT_OLD, COORD_INIT_NEW, "PowerModeTracker init")
     text = _replace_once(
         text, COORD_ENDPOINTS_OLD, COORD_ENDPOINTS_NEW, "vehicle_data_combo endpoint"
     )
