@@ -29,7 +29,7 @@ import urllib.request
 from pathlib import Path
 
 COMPONENT_DIR = Path("custom_components/tesla_fleet")
-UPSTREAM_REF = os.environ.get("UPSTREAM_REF", "dev")
+UPSTREAM_REF = os.environ.get("UPSTREAM_REF", "2026.7.2")
 RAW_BASE = (
     f"https://raw.githubusercontent.com/home-assistant/core/{UPSTREAM_REF}/homeassistant"
 )
@@ -46,6 +46,40 @@ class PatchError(RuntimeError):
 
 DEFAULT_VERSION = "1.0.0"
 FORK_URL = "https://github.com/jeffborg/tesla-fleet-extra"
+# The power-mode switch commands (set_low_power_mode / set_keep_accessory_power_mode)
+# need tesla-fleet-api >= this, which is newer than older HA releases pin. Used
+# as a floor: bump the pin up to it, but never downgrade a newer core pin.
+MIN_TESLA_FLEET_API = (1, 7, 2)
+
+
+def _pinned_version(requirement: str) -> tuple[int, ...] | None:
+    """Return the ==-pinned version tuple of a requirement, or None."""
+    name, _, version = requirement.partition("==")
+    if name.strip() != "tesla-fleet-api" or not version:
+        return None
+    try:
+        return tuple(int(p) for p in version.strip().split("."))
+    except ValueError:
+        return None
+
+
+def _floor_tesla_fleet_api(requirements: list[str]) -> list[str]:
+    """Ensure tesla-fleet-api is pinned to at least MIN_TESLA_FLEET_API.
+
+    Bumps the pin up to the floor when core pins lower (older releases pin a
+    version without the power-mode methods) but keeps a newer core pin, and
+    leaves any other requirements untouched.
+    """
+    floor = ".".join(str(p) for p in MIN_TESLA_FLEET_API)
+    result = list(requirements)
+    for i, req in enumerate(result):
+        pinned = _pinned_version(req)
+        if pinned is not None:
+            if pinned < MIN_TESLA_FLEET_API:
+                result[i] = f"tesla-fleet-api=={floor}"
+            return result
+    result.append(f"tesla-fleet-api=={floor}")
+    return result
 
 
 def _committed_manifest_version() -> str | None:
@@ -90,6 +124,10 @@ def patch_manifest() -> None:
         if manifest.get(key) != value:
             manifest[key] = value
             changed = True
+    floored = _floor_tesla_fleet_api(manifest.get("requirements", []))
+    if manifest.get("requirements") != floored:
+        manifest["requirements"] = floored
+        changed = True
     if "version" not in manifest:
         manifest["version"] = _committed_manifest_version() or DEFAULT_VERSION
         changed = True
@@ -109,9 +147,7 @@ def patch_manifest() -> None:
 # switch.py
 # ---------------------------------------------------------------------------
 
-SWITCH_ASSUMED_FIELD = (
-    "    assumed_state: bool = False\n    signing_required: bool = False\n"
-)
+SWITCH_SIGNING_FIELD = "    signing_required: bool = False\n"
 
 SWITCH_CUSTOM_DESCRIPTIONS = """\
     TeslaFleetSwitchEntityDescription(
@@ -119,7 +155,6 @@ SWITCH_CUSTOM_DESCRIPTIONS = """\
         on_func=lambda api: api.set_low_power_mode(on=True),
         off_func=lambda api: api.set_low_power_mode(on=False),
         scopes=[Scope.VEHICLE_CMDS],
-        assumed_state=True,
         signing_required=True,
     ),
     TeslaFleetSwitchEntityDescription(
@@ -127,7 +162,6 @@ SWITCH_CUSTOM_DESCRIPTIONS = """\
         on_func=lambda api: api.set_keep_accessory_power_mode(on=True),
         off_func=lambda api: api.set_keep_accessory_power_mode(on=False),
         scopes=[Scope.VEHICLE_CMDS],
-        assumed_state=True,
         signing_required=True,
     ),
 """
@@ -139,19 +173,6 @@ SWITCH_SETUP_FILTER = """\
                 # Signed-only commands (low power / keep accessory power) are
                 # only offered on vehicles that require command signing.
                 if vehicle.signing or not description.signing_required
-"""
-
-SWITCH_ASSUMED_INIT = """\
-        if description.assumed_state:
-            self._attr_assumed_state = True
-"""
-
-SWITCH_ASSUMED_UPDATE = """\
-        if self._value is None:
-            # For assumed_state entities, keep the last known commanded state
-            # rather than resetting to unknown, since the API doesn't report it.
-            if not self.entity_description.assumed_state:
-                self._attr_is_on = None
 """
 
 
@@ -174,12 +195,12 @@ def patch_switch() -> None:
         print("switch.py: customizations already present")
         return
 
-    # 1. assumed_state + signing_required fields on the description dataclass
+    # 1. signing_required field on the description dataclass
     text = _replace_once(
         text,
         "    unique_id: str | None = None\n",
-        "    unique_id: str | None = None\n" + SWITCH_ASSUMED_FIELD,
-        "description dataclass fields",
+        "    unique_id: str | None = None\n" + SWITCH_SIGNING_FIELD,
+        "signing_required dataclass field",
     )
 
     # 2. Custom switch descriptions, appended to VEHICLE_DESCRIPTIONS
@@ -198,23 +219,6 @@ def patch_switch() -> None:
         "                for description in VEHICLE_DESCRIPTIONS\n",
         SWITCH_SETUP_FILTER,
         "async_setup_entry signing filter",
-    )
-
-    # 4. assumed_state handling in the vehicle switch __init__
-    text = _replace_once(
-        text,
-        '            self._attr_unique_id = f"{data.vin}-{description.unique_id}"\n',
-        '            self._attr_unique_id = f"{data.vin}-{description.unique_id}"\n'
-        + SWITCH_ASSUMED_INIT,
-        "assumed_state __init__ handling",
-    )
-
-    # 5. Preserve assumed state in _async_update_attrs
-    text = _replace_once(
-        text,
-        "        if self._value is None:\n            self._attr_is_on = None\n",
-        SWITCH_ASSUMED_UPDATE,
-        "_async_update_attrs assumed_state handling",
     )
 
     path.write_text(text)
@@ -240,12 +244,18 @@ COORD_ENDPOINTS_NEW = """\
                 response = await self.api.vehicle_data(
                     endpoints=[*self.endpoints, POWER_MODE_ENDPOINT]
                 )
-            except (VehicleOffline, RateLimited, InvalidToken, OAuthExpired, LoginRequired):
+            except (
+                VehicleOffline,
+                RateLimited,
+                InvalidToken,
+                OAuthExpired,
+                LoginRequired,
+            ):
                 # Expected errors — let the outer handlers deal with them; don't
                 # retry (avoids doubling API calls, e.g. while rate limited).
                 raise
             except TeslaFleetError:
-                # Only an unexpected error (e.g. the vehicle_data_only endpoint
+                # Only an unexpected error (e.g. the vehicle_data_combo endpoint
                 # being rejected) reaches here; retry without it so power-mode
                 # state is the only thing lost, not the whole coordinator.
                 response = await self.api.vehicle_data(endpoints=self.endpoints)
@@ -258,7 +268,7 @@ COORD_RETURN_NEW = """\
                     self.update_interval = VEHICLE_WAIT
 
         # Low power / keep accessory power live only in the protobuf snapshot
-        # (vehicle_data_only endpoint), not the JSON. Decode and merge them in.
+        # (vehicle_data_combo endpoint), not the JSON. Decode and merge them in.
         vehicle_data_pb = data.pop("vehicle_data", None)
         result = flatten(data)
         result.update(decode_power_modes(vehicle_data_pb))
@@ -269,7 +279,7 @@ COORD_RETURN_NEW = """\
 def patch_coordinator() -> None:
     """Read low power / keep accessory power from the vehicle_data protobuf.
 
-    Requests the vehicle_data_only endpoint and merges the decoded booleans
+    Requests the vehicle_data_combo endpoint and merges the decoded booleans
     (from the fork-only power_mode module) into the coordinator data.
     """
     path = COMPONENT_DIR / "coordinator.py"
@@ -279,7 +289,7 @@ def patch_coordinator() -> None:
         return
     text = _replace_once(text, COORD_IMPORT, COORD_IMPORT_NEW, "power_mode import")
     text = _replace_once(
-        text, COORD_ENDPOINTS_OLD, COORD_ENDPOINTS_NEW, "vehicle_data_only endpoint"
+        text, COORD_ENDPOINTS_OLD, COORD_ENDPOINTS_NEW, "vehicle_data_combo endpoint"
     )
     text = _replace_once(
         text, COORD_RETURN_OLD, COORD_RETURN_NEW, "power-mode decode"

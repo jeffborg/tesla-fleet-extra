@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from itertools import chain
 from typing import Any, override
 
-from tesla_fleet_api.const import AutoSeat, Scope
+from tesla_fleet_api.const import AutoSeat, Scope, Seat
 
 from homeassistant.components.switch import (
     SwitchDeviceClass,
@@ -33,7 +33,6 @@ class TeslaFleetSwitchEntityDescription(SwitchEntityDescription):
     scopes: list[Scope]
     value_func: Callable[[StateType], bool] = bool
     unique_id: str | None = None
-    assumed_state: bool = False
     signing_required: bool = False
 
 
@@ -50,7 +49,7 @@ VEHICLE_DESCRIPTIONS: tuple[TeslaFleetSwitchEntityDescription, ...] = (
             AutoSeat.FRONT_LEFT, True
         ),
         off_func=lambda api: api.remote_auto_seat_climate_request(
-            AutoSeat.FRONT_LEFT, False
+            Seat.FRONT_LEFT, False
         ),
         scopes=[Scope.VEHICLE_CMDS],
     ),
@@ -95,7 +94,6 @@ VEHICLE_DESCRIPTIONS: tuple[TeslaFleetSwitchEntityDescription, ...] = (
         on_func=lambda api: api.set_low_power_mode(on=True),
         off_func=lambda api: api.set_low_power_mode(on=False),
         scopes=[Scope.VEHICLE_CMDS],
-        assumed_state=True,
         signing_required=True,
     ),
     TeslaFleetSwitchEntityDescription(
@@ -103,7 +101,6 @@ VEHICLE_DESCRIPTIONS: tuple[TeslaFleetSwitchEntityDescription, ...] = (
         on_func=lambda api: api.set_keep_accessory_power_mode(on=True),
         off_func=lambda api: api.set_keep_accessory_power_mode(on=False),
         scopes=[Scope.VEHICLE_CMDS],
-        assumed_state=True,
         signing_required=True,
     ),
 )
@@ -168,17 +165,12 @@ class TeslaFleetVehicleSwitchEntity(TeslaFleetVehicleEntity, TeslaFleetSwitchEnt
         super().__init__(data, description.key)
         if description.unique_id:
             self._attr_unique_id = f"{data.vin}-{description.unique_id}"
-        if description.assumed_state:
-            self._attr_assumed_state = True
 
     @override
     def _async_update_attrs(self) -> None:
         """Update the attributes of the sensor."""
         if self._value is None:
-            # For assumed_state entities, keep the last known commanded state
-            # rather than resetting to unknown, since the API doesn't report it.
-            if not self.entity_description.assumed_state:
-                self._attr_is_on = None
+            self._attr_is_on = None
         else:
             self._attr_is_on = self.entity_description.value_func(self._value)
 

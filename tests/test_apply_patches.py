@@ -34,6 +34,27 @@ def test_replace_once_requires_single_match() -> None:
         ap._replace_once("none", "a", "b", "t")
 
 
+def test_tesla_fleet_api_floor() -> None:
+    # Bumps up to the floor when core pins lower (power-mode methods need it)...
+    assert ap._floor_tesla_fleet_api(["tesla-fleet-api==1.4.7"]) == [
+        "tesla-fleet-api==1.7.2"
+    ]
+    # ...but never downgrades a newer core pin...
+    assert ap._floor_tesla_fleet_api(["tesla-fleet-api==1.8.0"]) == [
+        "tesla-fleet-api==1.8.0"
+    ]
+    # ...preserves other requirements...
+    assert ap._floor_tesla_fleet_api(["tesla-fleet-api==1.4.7", "other==2"]) == [
+        "tesla-fleet-api==1.7.2",
+        "other==2",
+    ]
+    # ...and adds the pin if core somehow dropped it.
+    assert ap._floor_tesla_fleet_api(["other==2"]) == [
+        "other==2",
+        "tesla-fleet-api==1.7.2",
+    ]
+
+
 def test_reference_resolver(monkeypatch) -> None:
     ap._strings_cache.clear()
 
@@ -166,8 +187,7 @@ def test_switch_patch_reinjects_customizations(tmp_path, monkeypatch) -> None:
     assert "api.set_low_power_mode(on=True)" in result
     assert "api.set_keep_accessory_power_mode(on=False)" in result
     assert "if vehicle.signing or not description.signing_required" in result
-    assert "if description.assumed_state:" in result
-    assert "if not self.entity_description.assumed_state:" in result
+    assert "assumed_state" not in result
     # The result must be valid Python.
     compile(result, "switch.py", "exec")
 
