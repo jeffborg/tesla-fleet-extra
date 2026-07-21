@@ -90,6 +90,32 @@ def _varint_field(buf: bytes, target: int) -> int | None:
     return None
 
 
+class PowerModeTracker:
+    """Hold the last power-mode state, refreshed only from fresh captures.
+
+    The Fleet API returns *cached* vehicle_data when the car is asleep, carrying
+    a stale ``charge_state`` (with an old timestamp) that would otherwise flip
+    the switches back to a value the user already changed. This keeps the last
+    known-good state and only updates it when a newer capture timestamp arrives,
+    so a cached/stale read never overrides real state.
+    """
+
+    def __init__(self) -> None:
+        self._values: dict[str, bool] = {}
+        self._timestamp: int = 0
+
+    def update(self, vehicle_data_b64: str | None, timestamp: int) -> dict[str, bool]:
+        """Refresh from a newer capture and return the current state to merge."""
+        if vehicle_data_b64 is not None and (
+            timestamp == 0 or timestamp > self._timestamp
+        ):
+            decoded = decode_power_modes(vehicle_data_b64)
+            if decoded:
+                self._values = decoded
+                self._timestamp = timestamp
+        return dict(self._values)
+
+
 def decode_power_modes(vehicle_data_b64: str | None) -> dict[str, bool]:
     """Extract the two power-mode booleans from the vehicle_data protobuf.
 
