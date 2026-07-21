@@ -39,7 +39,7 @@ The only intentional differences from HA core's `tesla_fleet` are:
    toggles (real state comes from `power_mode.py`), not assumed-state.
 2. **`manifest.json`** — adds a `version` field (required for custom
    components) and floors `tesla-fleet-api` to **>= 1.7.2** (the power-mode
-   methods need it; older HA releases pin lower, e.g. 2026.7.1 pins 1.4.7). The
+   methods need it; older HA releases pin lower, e.g. 2026.7.2 pins 1.4.7). The
    floor never downgrades a newer core pin — see `_floor_tesla_fleet_api` in
    `apply_patches.py`.
 3. **`strings.json` / `translations/en.json`** — entries for the two extra
@@ -64,7 +64,7 @@ Upstream source lives at
 - **Sync from the HA-core RELEASE tag matching your installed HA, not `dev`.**
   `dev` references core APIs newer HA doesn't have yet (e.g.
   `device_tracker.EntityStateAttribute`), which breaks entities on released HA.
-  The sync default and `apply_patches.py` target `2026.7.1`; bump both when you
+  The sync default and `apply_patches.py` target `2026.7.2`; bump both when you
   upgrade HA.
 - `apply_patches.py` floors `tesla-fleet-api` to **>= 1.7.2** (power-mode
   methods), so the manifest works even when the synced core release pins lower.

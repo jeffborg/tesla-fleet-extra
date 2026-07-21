@@ -13,7 +13,7 @@ on:
         # to the tag matching your HA when you upgrade (e.g. 2026.8.0).
         description: "HA core release tag to sync from (match your installed HA version)"
         required: false
-        default: "2026.7.1"
+        default: "2026.7.2"
 
 permissions:
   contents: write
@@ -41,7 +41,7 @@ jobs:
           RAW_REF: ${{ github.event.inputs.upstream_ref }}
         run: |
           set -euo pipefail
-          REF="${RAW_REF:-2026.7.1}"
+          REF="${RAW_REF:-2026.7.2}"
           # Validate: a git ref cannot contain shell metacharacters or newlines.
           if [[ ! "$REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
             echo "::error::Invalid upstream ref: $REF"

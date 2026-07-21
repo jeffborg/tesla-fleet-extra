@@ -29,7 +29,7 @@ import urllib.request
 from pathlib import Path
 
 COMPONENT_DIR = Path("custom_components/tesla_fleet")
-UPSTREAM_REF = os.environ.get("UPSTREAM_REF", "2026.7.1")
+UPSTREAM_REF = os.environ.get("UPSTREAM_REF", "2026.7.2")
 RAW_BASE = (
     f"https://raw.githubusercontent.com/home-assistant/core/{UPSTREAM_REF}/homeassistant"
 )
