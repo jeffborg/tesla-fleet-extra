@@ -29,7 +29,7 @@ import urllib.request
 from pathlib import Path
 
 COMPONENT_DIR = Path("custom_components/tesla_fleet")
-UPSTREAM_REF = os.environ.get("UPSTREAM_REF", "dev")
+UPSTREAM_REF = os.environ.get("UPSTREAM_REF", "2026.7.1")
 RAW_BASE = (
     f"https://raw.githubusercontent.com/home-assistant/core/{UPSTREAM_REF}/homeassistant"
 )
@@ -46,6 +46,10 @@ class PatchError(RuntimeError):
 
 DEFAULT_VERSION = "1.0.0"
 FORK_URL = "https://github.com/jeffborg/tesla-fleet-extra"
+# The power-mode switch commands (set_low_power_mode / set_keep_accessory_power_mode)
+# require tesla-fleet-api >= 1.7.2, which is newer than older HA releases pin.
+# Override the pin so the fork works even when synced from an older core release.
+REQUIRED_TESLA_FLEET_API = "tesla-fleet-api==1.7.2"
 
 
 def _committed_manifest_version() -> str | None:
@@ -90,6 +94,9 @@ def patch_manifest() -> None:
         if manifest.get(key) != value:
             manifest[key] = value
             changed = True
+    if manifest.get("requirements") != [REQUIRED_TESLA_FLEET_API]:
+        manifest["requirements"] = [REQUIRED_TESLA_FLEET_API]
+        changed = True
     if "version" not in manifest:
         manifest["version"] = _committed_manifest_version() or DEFAULT_VERSION
         changed = True
