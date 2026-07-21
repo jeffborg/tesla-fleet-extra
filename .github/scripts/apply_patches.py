@@ -160,7 +160,7 @@ def _replace_once(text: str, old: str, new: str, what: str) -> str:
     count = text.count(old)
     if count != 1:
         raise PatchError(
-            f"switch.py: expected exactly one anchor for {what!r}, found {count}"
+            f"expected exactly one anchor for {what!r}, found {count}"
         )
     return text.replace(old, new)
 
@@ -236,9 +236,14 @@ COORD_ENDPOINTS_OLD = (
     "            response = await self.api.vehicle_data(endpoints=self.endpoints)\n"
 )
 COORD_ENDPOINTS_NEW = """\
-            response = await self.api.vehicle_data(
-                endpoints=[*self.endpoints, POWER_MODE_ENDPOINT]
-            )
+            try:
+                response = await self.api.vehicle_data(
+                    endpoints=[*self.endpoints, POWER_MODE_ENDPOINT]
+                )
+            except TeslaFleetError:
+                # The extra vehicle_data_only endpoint (power-mode state) must
+                # never take down the coordinator; fall back to the standard set.
+                response = await self.api.vehicle_data(endpoints=self.endpoints)
 """
 
 COORD_RETURN_OLD = (

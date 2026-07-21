@@ -154,9 +154,14 @@ class TeslaFleetVehicleDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self.data["state"] != TeslaFleetState.ONLINE:
                 return self.data
 
-            response = await self.api.vehicle_data(
-                endpoints=[*self.endpoints, POWER_MODE_ENDPOINT]
-            )
+            try:
+                response = await self.api.vehicle_data(
+                    endpoints=[*self.endpoints, POWER_MODE_ENDPOINT]
+                )
+            except TeslaFleetError:
+                # The extra vehicle_data_only endpoint (power-mode state) must
+                # never take down the coordinator; fall back to the standard set.
+                response = await self.api.vehicle_data(endpoints=self.endpoints)
             data = response["response"]
 
         except VehicleOffline:
