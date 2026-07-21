@@ -34,6 +34,27 @@ def test_replace_once_requires_single_match() -> None:
         ap._replace_once("none", "a", "b", "t")
 
 
+def test_tesla_fleet_api_floor() -> None:
+    # Bumps up to the floor when core pins lower (power-mode methods need it)...
+    assert ap._floor_tesla_fleet_api(["tesla-fleet-api==1.4.7"]) == [
+        "tesla-fleet-api==1.7.2"
+    ]
+    # ...but never downgrades a newer core pin...
+    assert ap._floor_tesla_fleet_api(["tesla-fleet-api==1.8.0"]) == [
+        "tesla-fleet-api==1.8.0"
+    ]
+    # ...preserves other requirements...
+    assert ap._floor_tesla_fleet_api(["tesla-fleet-api==1.4.7", "other==2"]) == [
+        "tesla-fleet-api==1.7.2",
+        "other==2",
+    ]
+    # ...and adds the pin if core somehow dropped it.
+    assert ap._floor_tesla_fleet_api(["other==2"]) == [
+        "other==2",
+        "tesla-fleet-api==1.7.2",
+    ]
+
+
 def test_reference_resolver(monkeypatch) -> None:
     ap._strings_cache.clear()
 

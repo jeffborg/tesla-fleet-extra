@@ -47,9 +47,39 @@ class PatchError(RuntimeError):
 DEFAULT_VERSION = "1.0.0"
 FORK_URL = "https://github.com/jeffborg/tesla-fleet-extra"
 # The power-mode switch commands (set_low_power_mode / set_keep_accessory_power_mode)
-# require tesla-fleet-api >= 1.7.2, which is newer than older HA releases pin.
-# Override the pin so the fork works even when synced from an older core release.
-REQUIRED_TESLA_FLEET_API = "tesla-fleet-api==1.7.2"
+# need tesla-fleet-api >= this, which is newer than older HA releases pin. Used
+# as a floor: bump the pin up to it, but never downgrade a newer core pin.
+MIN_TESLA_FLEET_API = (1, 7, 2)
+
+
+def _pinned_version(requirement: str) -> tuple[int, ...] | None:
+    """Return the ==-pinned version tuple of a requirement, or None."""
+    name, _, version = requirement.partition("==")
+    if name.strip() != "tesla-fleet-api" or not version:
+        return None
+    try:
+        return tuple(int(p) for p in version.strip().split("."))
+    except ValueError:
+        return None
+
+
+def _floor_tesla_fleet_api(requirements: list[str]) -> list[str]:
+    """Ensure tesla-fleet-api is pinned to at least MIN_TESLA_FLEET_API.
+
+    Bumps the pin up to the floor when core pins lower (older releases pin a
+    version without the power-mode methods) but keeps a newer core pin, and
+    leaves any other requirements untouched.
+    """
+    floor = ".".join(str(p) for p in MIN_TESLA_FLEET_API)
+    result = list(requirements)
+    for i, req in enumerate(result):
+        pinned = _pinned_version(req)
+        if pinned is not None:
+            if pinned < MIN_TESLA_FLEET_API:
+                result[i] = f"tesla-fleet-api=={floor}"
+            return result
+    result.append(f"tesla-fleet-api=={floor}")
+    return result
 
 
 def _committed_manifest_version() -> str | None:
@@ -94,8 +124,9 @@ def patch_manifest() -> None:
         if manifest.get(key) != value:
             manifest[key] = value
             changed = True
-    if manifest.get("requirements") != [REQUIRED_TESLA_FLEET_API]:
-        manifest["requirements"] = [REQUIRED_TESLA_FLEET_API]
+    floored = _floor_tesla_fleet_api(manifest.get("requirements", []))
+    if manifest.get("requirements") != floored:
+        manifest["requirements"] = floored
         changed = True
     if "version" not in manifest:
         manifest["version"] = _committed_manifest_version() or DEFAULT_VERSION
