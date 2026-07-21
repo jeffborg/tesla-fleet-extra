@@ -166,8 +166,7 @@ def test_switch_patch_reinjects_customizations(tmp_path, monkeypatch) -> None:
     assert "api.set_low_power_mode(on=True)" in result
     assert "api.set_keep_accessory_power_mode(on=False)" in result
     assert "if vehicle.signing or not description.signing_required" in result
-    assert "if description.assumed_state:" in result
-    assert "if not self.entity_description.assumed_state:" in result
+    assert "assumed_state" not in result
     # The result must be valid Python.
     compile(result, "switch.py", "exec")
 

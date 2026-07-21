@@ -26,9 +26,8 @@ def _description(key: str):
 
 
 @pytest.mark.parametrize("key", CUSTOM_SWITCHES)
-def test_custom_switch_is_assumed_state_and_signing_gated(key: str) -> None:
+def test_custom_switch_is_signing_gated(key: str) -> None:
     description = _description(key)
-    assert description.assumed_state is True
     assert description.signing_required is True
     assert Scope.VEHICLE_CMDS in description.scopes
 
@@ -88,8 +87,8 @@ def test_library_methods_accept_on_kwarg(method: str) -> None:
 @pytest.mark.parametrize("key", CUSTOM_SWITCHES)
 def test_switch_reflects_decoded_coordinator_state(key: str) -> None:
     # The coordinator merges the decoded protobuf booleans under the switch
-    # keys; the entity must surface them as is_on (and keep the last value as
-    # assumed state when the key is momentarily absent).
+    # keys; the entity must surface them as is_on, and report unknown (None)
+    # when the key is absent (real state, not an assumed toggle).
     from types import SimpleNamespace
 
     entity = switch.TeslaFleetVehicleSwitchEntity.__new__(
@@ -107,7 +106,7 @@ def test_switch_reflects_decoded_coordinator_state(key: str) -> None:
     entity._async_update_attrs()
     assert entity._attr_is_on is False
 
-    # Key absent this cycle -> assumed_state keeps the last known value.
+    # Key absent this cycle -> unknown (no assumed-state carry-over).
     entity.coordinator.data.clear()
     entity._async_update_attrs()
-    assert entity._attr_is_on is False
+    assert entity._attr_is_on is None

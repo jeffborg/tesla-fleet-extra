@@ -31,10 +31,12 @@ The only intentional differences from HA core's `tesla_fleet` are:
 
 1. **`switch.py`** — the two extra switch descriptions
    (`vehicle_state_low_power_mode`, `vehicle_state_keep_accessory_power_on`)
-   plus the `assumed_state` handling they need. The commands are sent with the
+   plus a `signing_required` field that gates them (in `async_setup_entry`) to
+   vehicles that require command signing. The commands are sent with the
    **public** `tesla-fleet-api` methods `set_low_power_mode(on)` and
    `set_keep_accessory_power_mode(on)` — do **not** reach into private
-   internals (e.g. `api._command`) or hand-build protobuf.
+   internals (e.g. `api._command`) or hand-build protobuf. They are normal
+   toggles (real state comes from `power_mode.py`), not assumed-state.
 2. **`manifest.json`** — adds a `version` field (required for custom
    components) and pins `tesla-fleet-api` to the same release HA core pins.
 3. **`strings.json` / `translations/en.json` / `icons.json`** — entries for the
@@ -68,7 +70,7 @@ Upstream source lives at
 - Python style follows HA core (ruff/pylint clean; `SLF001` private-access
   lint should not be needed once the public API methods are used).
 - The domain **must** remain `tesla_fleet` — changing it breaks the override.
-- Power-mode state is read from the protobuf snapshot (`power_mode.py`) with a
-  ~30–50s Fleet-API lag; the switches keep **assumed state** as the between-poll
-  fallback (instant feedback on your own commands, real state once it catches up
-  or when changed from the Tesla app).
+- Power-mode state is read from the `vehicle_data_combo` protobuf snapshot
+  (`power_mode.py`); the switches are normal toggles showing real state, which
+  updates within a poll (~30–50s Fleet-API lag) when changed from the Tesla app
+  or an automation.

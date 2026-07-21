@@ -109,9 +109,7 @@ def patch_manifest() -> None:
 # switch.py
 # ---------------------------------------------------------------------------
 
-SWITCH_ASSUMED_FIELD = (
-    "    assumed_state: bool = False\n    signing_required: bool = False\n"
-)
+SWITCH_SIGNING_FIELD = "    signing_required: bool = False\n"
 
 SWITCH_CUSTOM_DESCRIPTIONS = """\
     TeslaFleetSwitchEntityDescription(
@@ -119,7 +117,6 @@ SWITCH_CUSTOM_DESCRIPTIONS = """\
         on_func=lambda api: api.set_low_power_mode(on=True),
         off_func=lambda api: api.set_low_power_mode(on=False),
         scopes=[Scope.VEHICLE_CMDS],
-        assumed_state=True,
         signing_required=True,
     ),
     TeslaFleetSwitchEntityDescription(
@@ -127,7 +124,6 @@ SWITCH_CUSTOM_DESCRIPTIONS = """\
         on_func=lambda api: api.set_keep_accessory_power_mode(on=True),
         off_func=lambda api: api.set_keep_accessory_power_mode(on=False),
         scopes=[Scope.VEHICLE_CMDS],
-        assumed_state=True,
         signing_required=True,
     ),
 """
@@ -139,19 +135,6 @@ SWITCH_SETUP_FILTER = """\
                 # Signed-only commands (low power / keep accessory power) are
                 # only offered on vehicles that require command signing.
                 if vehicle.signing or not description.signing_required
-"""
-
-SWITCH_ASSUMED_INIT = """\
-        if description.assumed_state:
-            self._attr_assumed_state = True
-"""
-
-SWITCH_ASSUMED_UPDATE = """\
-        if self._value is None:
-            # For assumed_state entities, keep the last known commanded state
-            # rather than resetting to unknown, since the API doesn't report it.
-            if not self.entity_description.assumed_state:
-                self._attr_is_on = None
 """
 
 
@@ -174,12 +157,12 @@ def patch_switch() -> None:
         print("switch.py: customizations already present")
         return
 
-    # 1. assumed_state + signing_required fields on the description dataclass
+    # 1. signing_required field on the description dataclass
     text = _replace_once(
         text,
         "    unique_id: str | None = None\n",
-        "    unique_id: str | None = None\n" + SWITCH_ASSUMED_FIELD,
-        "description dataclass fields",
+        "    unique_id: str | None = None\n" + SWITCH_SIGNING_FIELD,
+        "signing_required dataclass field",
     )
 
     # 2. Custom switch descriptions, appended to VEHICLE_DESCRIPTIONS
@@ -198,23 +181,6 @@ def patch_switch() -> None:
         "                for description in VEHICLE_DESCRIPTIONS\n",
         SWITCH_SETUP_FILTER,
         "async_setup_entry signing filter",
-    )
-
-    # 4. assumed_state handling in the vehicle switch __init__
-    text = _replace_once(
-        text,
-        '            self._attr_unique_id = f"{data.vin}-{description.unique_id}"\n',
-        '            self._attr_unique_id = f"{data.vin}-{description.unique_id}"\n'
-        + SWITCH_ASSUMED_INIT,
-        "assumed_state __init__ handling",
-    )
-
-    # 5. Preserve assumed state in _async_update_attrs
-    text = _replace_once(
-        text,
-        "        if self._value is None:\n            self._attr_is_on = None\n",
-        SWITCH_ASSUMED_UPDATE,
-        "_async_update_attrs assumed_state handling",
     )
 
     path.write_text(text)
