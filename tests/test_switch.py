@@ -83,3 +83,31 @@ def test_library_methods_accept_on_kwarg(method: str) -> None:
     # signed commands that take a single ``on`` argument.
     params = inspect.signature(getattr(Commands, method)).parameters
     assert list(params) == ["self", "on"]
+
+
+@pytest.mark.parametrize("key", CUSTOM_SWITCHES)
+def test_switch_reflects_decoded_coordinator_state(key: str) -> None:
+    # The coordinator merges the decoded protobuf booleans under the switch
+    # keys; the entity must surface them as is_on (and keep the last value as
+    # assumed state when the key is momentarily absent).
+    from types import SimpleNamespace
+
+    entity = switch.TeslaFleetVehicleSwitchEntity.__new__(
+        switch.TeslaFleetVehicleSwitchEntity
+    )
+    entity.entity_description = _description(key)
+    entity.key = key
+    entity._attr_is_on = None
+    entity.coordinator = SimpleNamespace(data={key: True})
+
+    entity._async_update_attrs()
+    assert entity._attr_is_on is True
+
+    entity.coordinator.data[key] = False
+    entity._async_update_attrs()
+    assert entity._attr_is_on is False
+
+    # Key absent this cycle -> assumed_state keeps the last known value.
+    entity.coordinator.data.clear()
+    entity._async_update_attrs()
+    assert entity._attr_is_on is False

@@ -39,7 +39,14 @@ The only intentional differences from HA core's `tesla_fleet` are:
    components) and pins `tesla-fleet-api` to the same release HA core pins.
 3. **`strings.json` / `translations/en.json` / `icons.json`** — entries for the
    two extra switches.
-4. **`README.md` / `hacs.json`** — repo packaging, not part of core.
+4. **`coordinator.py`** — requests the `vehicle_data_only` endpoint and merges
+   the decoded low-power / keep-accessory-power state (from `power_mode.py`)
+   into the coordinator data, so the two switches show **real** state.
+5. **`power_mode.py`** — fork-only module (no core equivalent). Decodes the
+   base64 `vehicle_data` protobuf: `charge_state` field 191 = low power,
+   field 194 = keep accessory power (both undocumented in Tesla's proto, so
+   decoded from raw wire format). The upstream sync leaves it untouched.
+6. **`README.md` / `hacs.json`** — repo packaging, not part of core.
 
 When touching anything else, prefer syncing the file verbatim from HA core
 rather than editing by hand.
@@ -61,5 +68,7 @@ Upstream source lives at
 - Python style follows HA core (ruff/pylint clean; `SLF001` private-access
   lint should not be needed once the public API methods are used).
 - The domain **must** remain `tesla_fleet` — changing it breaks the override.
-- Because Tesla's API does not report power-mode state, those two switches use
-  **assumed state** (they remember the last commanded value).
+- Power-mode state is read from the protobuf snapshot (`power_mode.py`) with a
+  ~30–50s Fleet-API lag; the switches keep **assumed state** as the between-poll
+  fallback (instant feedback on your own commands, real state once it catches up
+  or when changed from the Tesla app).

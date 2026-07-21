@@ -176,6 +176,44 @@ def test_switch_patch_reinjects_customizations(tmp_path, monkeypatch) -> None:
     assert (comp / "switch.py").read_text() == result
 
 
+CORE_COORDINATOR = (
+    "from .const import DOMAIN, ENERGY_HISTORY_FIELDS, LOGGER, TeslaFleetState\n"
+    "\n\n"
+    "class TeslaFleetVehicleDataCoordinator:\n"
+    "    async def _async_update_data(self):\n"
+    "        try:\n"
+    "            response = await self.api.vehicle_data(endpoints=self.endpoints)\n"
+    '            data = response["response"]\n'
+    "        except Exception:\n"
+    "            pass\n"
+    "        if a:\n"
+    "            if b:\n"
+    "                if c:\n"
+    "                    self.update_interval = VEHICLE_WAIT\n"
+    "\n"
+    "        return flatten(data)\n"
+)
+
+
+def test_coordinator_patch_adds_power_mode_reading(tmp_path, monkeypatch) -> None:
+    comp = tmp_path / "tesla_fleet"
+    comp.mkdir()
+    (comp / "coordinator.py").write_text(CORE_COORDINATOR)
+    monkeypatch.setattr(ap, "COMPONENT_DIR", comp)
+
+    ap.patch_coordinator()
+    result = (comp / "coordinator.py").read_text()
+
+    assert "from .power_mode import POWER_MODE_ENDPOINT, decode_power_modes" in result
+    assert "endpoints=[*self.endpoints, POWER_MODE_ENDPOINT]" in result
+    assert 'data.pop("vehicle_data", None)' in result
+    assert "decode_power_modes(vehicle_data_pb)" in result
+
+    # Re-running is a no-op.
+    ap.patch_coordinator()
+    assert (comp / "coordinator.py").read_text() == result
+
+
 def test_switch_patch_fails_loudly_on_missing_anchor(tmp_path, monkeypatch) -> None:
     comp = tmp_path / "tesla_fleet"
     comp.mkdir()
