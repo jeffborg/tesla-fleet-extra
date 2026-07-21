@@ -11,7 +11,7 @@ reads). Within that ``CarServer.VehicleData`` message:
 Both fields are undocumented in Tesla's published ``vehicle.proto``, so we
 decode them straight from the protobuf wire format rather than relying on
 generated classes (which omit unknown fields). Any decode failure returns an
-empty mapping, so the switches fall back to their assumed state.
+empty mapping, so the switches keep their previous state (or show unknown).
 
 This is a fork-only module — it is not part of HA core and is left untouched by
 the upstream sync.

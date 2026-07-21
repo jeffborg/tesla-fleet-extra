@@ -158,7 +158,13 @@ class TeslaFleetVehicleDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 response = await self.api.vehicle_data(
                     endpoints=[*self.endpoints, POWER_MODE_ENDPOINT]
                 )
-            except (VehicleOffline, RateLimited, InvalidToken, OAuthExpired, LoginRequired):
+            except (
+                VehicleOffline,
+                RateLimited,
+                InvalidToken,
+                OAuthExpired,
+                LoginRequired,
+            ):
                 # Expected errors — let the outer handlers deal with them; don't
                 # retry (avoids doubling API calls, e.g. while rate limited).
                 raise

@@ -27,10 +27,15 @@ jobs:
         run: pip install -r requirements_test.txt
 
       - name: Lint
-        # Lint our own code: the tests, the sync script, and switch.py (the one
-        # component file the fork authors). The rest of custom_components is a
-        # verbatim copy of HA core and is linted upstream.
-        run: ruff check tests .github/scripts custom_components/tesla_fleet/switch.py
+        # Lint our own code: the tests, the sync script, and the fork-authored /
+        # customized component files (switch.py, coordinator.py, power_mode.py).
+        # The rest of custom_components is a verbatim copy of HA core and is
+        # linted upstream.
+        run: >-
+          ruff check tests .github/scripts
+          custom_components/tesla_fleet/switch.py
+          custom_components/tesla_fleet/coordinator.py
+          custom_components/tesla_fleet/power_mode.py
 
       - name: Run tests
         run: pytest -q
