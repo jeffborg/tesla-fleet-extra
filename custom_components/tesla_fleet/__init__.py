@@ -165,7 +165,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TeslaFleetConfigEntry) -
             # Remove the protobuff 'cached_data' that we do not use to save memory
             product.pop("cached_data", None)
             vin = product["vin"]
-            signing = product["command_signing"] == "required"
+            signing = product["command_signing"] in ("required", "allowed")
             api_vehicle: VehicleFleet
             if signing:
                 if not tesla.private_key:
