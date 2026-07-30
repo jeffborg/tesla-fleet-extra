@@ -166,6 +166,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: TeslaFleetConfigEntry) -
             product.pop("cached_data", None)
             vin = product["vin"]
             signing = product["command_signing"] == "required"
+            # Fork-only diagnostic (issue #17): the low power / keep accessory
+            # power switches are only offered when Tesla reports command signing
+            # is required. Log the raw value so a user whose switches are missing
+            # can confirm what Tesla returns for their VIN.
+            LOGGER.debug(
+                "Vehicle %s command_signing=%r -> power-mode switches %s",
+                vin,
+                product.get("command_signing"),
+                "offered" if signing else "hidden",
+            )
             api_vehicle: VehicleFleet
             if signing:
                 if not tesla.private_key:

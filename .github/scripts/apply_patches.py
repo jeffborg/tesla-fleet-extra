@@ -8,6 +8,8 @@ that make this a custom component:
 * ``manifest.json`` — the ``version`` field custom components require.
 * ``switch.py`` — the two extra vehicle switches (low power mode / keep
   accessory power) sent via the public ``tesla-fleet-api`` power-mode methods.
+* ``__init__.py`` — a debug log of the raw per-vehicle ``command_signing``
+  value, so a user whose power-mode switches are missing can diagnose why.
 * ``strings.json`` — the entity names for those two switches.
 * ``translations/en.json`` — regenerated from ``strings.json`` with all
   ``[%key:...%]`` references resolved (HA core ships this via build tooling;
@@ -226,6 +228,44 @@ def patch_switch() -> None:
 
 
 # ---------------------------------------------------------------------------
+# __init__.py
+# ---------------------------------------------------------------------------
+
+INIT_SIGNING_ANCHOR = '            signing = product["command_signing"] == "required"\n'
+INIT_SIGNING_NEW = INIT_SIGNING_ANCHOR + (
+    "            # Fork-only diagnostic (issue #17): the low power / keep accessory\n"
+    "            # power switches are only offered when Tesla reports command signing\n"
+    "            # is required. Log the raw value so a user whose switches are missing\n"
+    "            # can confirm what Tesla returns for their VIN.\n"
+    "            LOGGER.debug(\n"
+    '                "Vehicle %s command_signing=%r -> power-mode switches %s",\n'
+    "                vin,\n"
+    '                product.get("command_signing"),\n'
+    '                "offered" if signing else "hidden",\n'
+    "            )\n"
+)
+
+
+def patch_init() -> None:
+    """Re-add the per-vehicle command_signing debug log.
+
+    Upstream computes ``signing`` from ``command_signing`` but never logs the
+    raw value, so a user whose power-mode switches are missing cannot tell what
+    Tesla returned for their VIN. This adds a debug line right after the check.
+    """
+    path = COMPONENT_DIR / "__init__.py"
+    text = path.read_text()
+    if "command_signing=%r" in text:
+        print("__init__.py: customizations already present")
+        return
+    text = _replace_once(
+        text, INIT_SIGNING_ANCHOR, INIT_SIGNING_NEW, "command_signing debug log"
+    )
+    path.write_text(text)
+    print("__init__.py: re-applied command_signing debug log")
+
+
+# ---------------------------------------------------------------------------
 # coordinator.py
 # ---------------------------------------------------------------------------
 
@@ -423,6 +463,7 @@ def main() -> None:
         sys.exit(1)
     patch_manifest()
     patch_switch()
+    patch_init()
     patch_coordinator()
     patch_strings()
     generate_en_json()

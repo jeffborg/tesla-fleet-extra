@@ -51,7 +51,12 @@ The only intentional differences from HA core's `tesla_fleet` are:
    base64 `vehicle_data` protobuf: `charge_state` field 191 = low power,
    field 194 = keep accessory power (both undocumented in Tesla's proto, so
    decoded from raw wire format). The upstream sync leaves it untouched.
-6. **`README.md` / `hacs.json`** — repo packaging, not part of core.
+6. **`__init__.py`** — a single `LOGGER.debug` line after the `command_signing`
+   check that logs the raw per-vehicle value, so a user whose power-mode
+   switches are missing can diagnose why (the switches only appear when
+   `command_signing == "required"`). Re-applied by `patch_init` in
+   `apply_patches.py`.
+7. **`README.md` / `hacs.json`** — repo packaging, not part of core.
 
 When touching anything else, prefer syncing the file verbatim from HA core
 rather than editing by hand.
