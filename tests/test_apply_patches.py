@@ -243,6 +243,52 @@ def test_coordinator_patch_adds_power_mode_reading(tmp_path, monkeypatch) -> Non
     assert (comp / "coordinator.py").read_text() == result
 
 
+CORE_INIT = (
+    "def async_setup_entry(hass, entry, products, scopes):\n"
+    "    for product in products:\n"
+    '        if "vin" in product and Scope.VEHICLE_DEVICE_DATA in scopes:\n'
+    '            vin = product["vin"]\n'
+    '            signing = product["command_signing"] == "required"\n'
+    "            api_vehicle = None\n"
+)
+
+
+def test_init_patch_adds_command_signing_log(tmp_path, monkeypatch) -> None:
+    comp = tmp_path / "tesla_fleet"
+    comp.mkdir()
+    (comp / "__init__.py").write_text(CORE_INIT)
+    monkeypatch.setattr(ap, "COMPONENT_DIR", comp)
+
+    ap.patch_init()
+    result = (comp / "__init__.py").read_text()
+
+    assert "LOGGER.debug(" in result
+    assert "command_signing=%r" in result
+    assert '"offered" if signing else "hidden"' in result
+    # The signing check is widened to also treat "allowed" as signing-capable.
+    assert 'signing = product["command_signing"] in ("required", "allowed")' in result
+    assert '== "required"' not in result
+    # The signing check and the log line must both be present and in order.
+    assert result.index('signing = product["command_signing"]') < result.index(
+        "LOGGER.debug("
+    )
+    compile(result, "__init__.py", "exec")
+
+    # Re-running is a no-op.
+    ap.patch_init()
+    assert (comp / "__init__.py").read_text() == result
+
+
+def test_init_patch_fails_loudly_on_missing_anchor(tmp_path, monkeypatch) -> None:
+    comp = tmp_path / "tesla_fleet"
+    comp.mkdir()
+    (comp / "__init__.py").write_text("# an upstream file with no known anchors\n")
+    monkeypatch.setattr(ap, "COMPONENT_DIR", comp)
+
+    with pytest.raises(ap.PatchError):
+        ap.patch_init()
+
+
 def test_switch_patch_fails_loudly_on_missing_anchor(tmp_path, monkeypatch) -> None:
     comp = tmp_path / "tesla_fleet"
     comp.mkdir()

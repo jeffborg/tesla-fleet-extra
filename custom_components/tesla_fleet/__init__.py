@@ -165,7 +165,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: TeslaFleetConfigEntry) -
             # Remove the protobuff 'cached_data' that we do not use to save memory
             product.pop("cached_data", None)
             vin = product["vin"]
-            signing = product["command_signing"] == "required"
+            signing = product["command_signing"] in ("required", "allowed")
+            # Fork-only diagnostic (issues #17 / #19): the low power / keep
+            # accessory power switches are only offered when the vehicle is
+            # command-signing capable. Tesla returns "required", "allowed", or
+            # "not_required"; both "required" and "allowed" mean the vehicle
+            # supports the Vehicle Command Protocol, so treat both as signing
+            # (core only checks "required", which hides the switches on
+            # "allowed" vehicles such as the 2025 Model 3). Log the raw value so
+            # a user whose switches are missing can confirm what Tesla returns
+            # for their VIN.
+            LOGGER.debug(
+                "Vehicle %s command_signing=%r -> power-mode switches %s",
+                vin,
+                product.get("command_signing"),
+                "offered" if signing else "hidden",
+            )
             api_vehicle: VehicleFleet
             if signing:
                 if not tesla.private_key:

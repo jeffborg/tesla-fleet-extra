@@ -8,6 +8,10 @@ that make this a custom component:
 * ``manifest.json`` — the ``version`` field custom components require.
 * ``switch.py`` — the two extra vehicle switches (low power mode / keep
   accessory power) sent via the public ``tesla-fleet-api`` power-mode methods.
+* ``__init__.py`` — treat ``command_signing == "allowed"`` as signing-capable
+  (not just ``"required"``) so the switches appear on those vehicles, plus a
+  debug log of the raw per-vehicle ``command_signing`` value so a user whose
+  power-mode switches are missing can diagnose why.
 * ``strings.json`` — the entity names for those two switches.
 * ``translations/en.json`` — regenerated from ``strings.json`` with all
   ``[%key:...%]`` references resolved (HA core ships this via build tooling;
@@ -226,6 +230,53 @@ def patch_switch() -> None:
 
 
 # ---------------------------------------------------------------------------
+# __init__.py
+# ---------------------------------------------------------------------------
+
+INIT_SIGNING_ANCHOR = '            signing = product["command_signing"] == "required"\n'
+INIT_SIGNING_NEW = (
+    '            signing = product["command_signing"] in ("required", "allowed")\n'
+    "            # Fork-only diagnostic (issues #17 / #19): the low power / keep\n"
+    "            # accessory power switches are only offered when the vehicle is\n"
+    "            # command-signing capable. Tesla returns \"required\", \"allowed\", or\n"
+    "            # \"not_required\"; both \"required\" and \"allowed\" mean the vehicle\n"
+    "            # supports the Vehicle Command Protocol, so treat both as signing\n"
+    "            # (core only checks \"required\", which hides the switches on\n"
+    "            # \"allowed\" vehicles such as the 2025 Model 3). Log the raw value so\n"
+    "            # a user whose switches are missing can confirm what Tesla returns\n"
+    "            # for their VIN.\n"
+    "            LOGGER.debug(\n"
+    '                "Vehicle %s command_signing=%r -> power-mode switches %s",\n'
+    "                vin,\n"
+    '                product.get("command_signing"),\n'
+    '                "offered" if signing else "hidden",\n'
+    "            )\n"
+)
+
+
+def patch_init() -> None:
+    """Widen the ``signing`` check and add a per-vehicle debug log.
+
+    Upstream computes ``signing`` as ``command_signing == "required"`` and never
+    logs the raw value. Tesla also returns ``"allowed"`` (e.g. the 2025 Model 3),
+    which likewise means the vehicle supports the Vehicle Command Protocol, so we
+    widen the check to ``in ("required", "allowed")`` (issue #19). We also add a
+    debug line right after the check so a user whose power-mode switches are
+    missing can tell what Tesla returned for their VIN (issue #17).
+    """
+    path = COMPONENT_DIR / "__init__.py"
+    text = path.read_text()
+    if "command_signing=%r" in text:
+        print("__init__.py: customizations already present")
+        return
+    text = _replace_once(
+        text, INIT_SIGNING_ANCHOR, INIT_SIGNING_NEW, "command_signing debug log"
+    )
+    path.write_text(text)
+    print("__init__.py: re-applied command_signing debug log")
+
+
+# ---------------------------------------------------------------------------
 # coordinator.py
 # ---------------------------------------------------------------------------
 
@@ -423,6 +474,7 @@ def main() -> None:
         sys.exit(1)
     patch_manifest()
     patch_switch()
+    patch_init()
     patch_coordinator()
     patch_strings()
     generate_en_json()

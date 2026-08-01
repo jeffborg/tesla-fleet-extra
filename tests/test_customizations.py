@@ -54,6 +54,26 @@ def test_switch_source_uses_public_power_mode_api() -> None:
     assert "protobuf" not in src
 
 
+def test_init_logs_per_vehicle_command_signing() -> None:
+    # Fork-only diagnostic (issue #17): the raw command_signing value is logged
+    # at debug so a user whose power-mode switches are missing can see what
+    # Tesla returned for their VIN. Must survive an upstream sync.
+    src = (COMPONENT / "__init__.py").read_text()
+    assert "command_signing=%r" in src
+    assert "LOGGER.debug(" in src
+
+
+def test_init_treats_allowed_command_signing_as_signing() -> None:
+    # Issue #19: Tesla returns command_signing="allowed" (e.g. 2025 Model 3) in
+    # addition to "required"/"not_required". Both "required" and "allowed" mean
+    # the vehicle supports the Vehicle Command Protocol, so the signed-only
+    # power-mode switches must be offered for both. Must survive an upstream sync
+    # (core only checks == "required").
+    src = (COMPONENT / "__init__.py").read_text()
+    assert 'product["command_signing"] in ("required", "allowed")' in src
+    assert 'product["command_signing"] == "required"' not in src
+
+
 def test_strings_have_custom_switch_names() -> None:
     switch = _load_json("strings.json")["entity"]["switch"]
     for key, name in CUSTOM_SWITCH_NAMES.items():
