@@ -32,7 +32,7 @@ The only intentional differences from HA core's `tesla_fleet` are:
 1. **`switch.py`** — the two extra switch descriptions
    (`vehicle_state_low_power_mode`, `vehicle_state_keep_accessory_power_on`)
    plus a `signing_required` field that gates them (in `async_setup_entry`) to
-   vehicles that require command signing. The commands are sent with the
+   vehicles that are command-signing capable (see #6). The commands are sent with the
    **public** `tesla-fleet-api` methods `set_low_power_mode(on)` and
    `set_keep_accessory_power_mode(on)` — do **not** reach into private
    internals (e.g. `api._command`) or hand-build protobuf. They are normal
@@ -51,10 +51,13 @@ The only intentional differences from HA core's `tesla_fleet` are:
    base64 `vehicle_data` protobuf: `charge_state` field 191 = low power,
    field 194 = keep accessory power (both undocumented in Tesla's proto, so
    decoded from raw wire format). The upstream sync leaves it untouched.
-6. **`__init__.py`** — a single `LOGGER.debug` line after the `command_signing`
-   check that logs the raw per-vehicle value, so a user whose power-mode
-   switches are missing can diagnose why (the switches only appear when
-   `command_signing == "required"`). Re-applied by `patch_init` in
+6. **`__init__.py`** — widens the `signing` check to
+   `command_signing in ("required", "allowed")` (core only checks `"required"`),
+   so the switches also appear on `"allowed"` vehicles like the 2025 Model 3
+   (issue #19) — both values mean the vehicle supports the Vehicle Command
+   Protocol. Plus a single `LOGGER.debug` line after the check that logs the raw
+   per-vehicle value, so a user whose power-mode switches are still missing can
+   diagnose why (issue #17). Both re-applied by `patch_init` in
    `apply_patches.py`.
 7. **`README.md` / `hacs.json`** — repo packaging, not part of core.
 

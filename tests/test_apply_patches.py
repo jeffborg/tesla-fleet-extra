@@ -265,6 +265,9 @@ def test_init_patch_adds_command_signing_log(tmp_path, monkeypatch) -> None:
     assert "LOGGER.debug(" in result
     assert "command_signing=%r" in result
     assert '"offered" if signing else "hidden"' in result
+    # The signing check is widened to also treat "allowed" as signing-capable.
+    assert 'signing = product["command_signing"] in ("required", "allowed")' in result
+    assert '== "required"' not in result
     # The signing check and the log line must both be present and in order.
     assert result.index('signing = product["command_signing"]') < result.index(
         "LOGGER.debug("

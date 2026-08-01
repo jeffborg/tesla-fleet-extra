@@ -20,7 +20,7 @@ This is a custom component that extends the built-in Home Assistant Tesla Fleet 
 
 ## Notes
 
-- These commands use the **Vehicle Command Protocol** (signed protobuf). They will not work on older vehicles that don't support signed commands, so the switches only appear on vehicles that require command signing.
+- These commands use the **Vehicle Command Protocol** (signed protobuf). They will not work on older vehicles that don't support signed commands, so the switches only appear on vehicles that are command-signing capable — Tesla reports `command_signing` as `required` or `allowed` (both supported); `not_required` vehicles don't get the switches.
 - The switches show **real** on/off state, read from the vehicle's `vehicle_data` protobuf snapshot. State reflects changes made anywhere — the Tesla app, an automation, or Home Assistant — within a poll (there's a ~30–50s lag before the Fleet API reflects a change).
 
 ## Releasing a new version
