@@ -179,6 +179,51 @@ SWITCH_SETUP_FILTER = """\
                 if vehicle.signing or not description.signing_required
 """
 
+# Route the signed-only switches through the optimistic subclass so a
+# just-issued command isn't reverted by a cached/offline read.
+SWITCH_SETUP_CLASS_OLD = (
+    "                TeslaFleetVehicleSwitchEntity(\n"
+    "                    vehicle, description, entry.runtime_data.scopes\n"
+    "                )\n"
+)
+SWITCH_SETUP_CLASS_NEW = (
+    "                (\n"
+    "                    TeslaFleetPowerModeSwitchEntity\n"
+    "                    if description.signing_required\n"
+    "                    else TeslaFleetVehicleSwitchEntity\n"
+    "                )(vehicle, description, entry.runtime_data.scopes)\n"
+)
+
+# Subclass inserted ahead of the first energy switch class. Its real state
+# comes from the lagging/cached vehicle_data protobuf, so it persists the
+# optimistic value on the coordinator after a successful command.
+SWITCH_POWER_MODE_ENTITY = '''\
+class TeslaFleetPowerModeSwitchEntity(TeslaFleetVehicleSwitchEntity):
+    """Signed low-power / keep-accessory-power switch.
+
+    Its real state comes from the vehicle_data snapshot, which lags and is
+    cached while the car sleeps. After a successful command, record the
+    optimistic value on the coordinator so a later cached/offline read can't
+    revert a command the user just issued until a fresh capture confirms it.
+    """
+
+    @override
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn on and record the optimistic power-mode state."""
+        await super().async_turn_on(**kwargs)
+        self.coordinator.mark_power_mode(self.key, True)
+
+    @override
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn off and record the optimistic power-mode state."""
+        await super().async_turn_off(**kwargs)
+        self.coordinator.mark_power_mode(self.key, False)
+
+
+'''
+
+SWITCH_ENERGY_CLASS_ANCHOR = "class TeslaFleetChargeFromGridSwitchEntity(\n"
+
 
 def _replace_once(text: str, old: str, new: str, what: str) -> str:
     """Replace ``old`` with ``new`` exactly once or raise PatchError."""
@@ -223,6 +268,19 @@ def patch_switch() -> None:
         "                for description in VEHICLE_DESCRIPTIONS\n",
         SWITCH_SETUP_FILTER,
         "async_setup_entry signing filter",
+    )
+
+    # 4. Route the signed-only switches through the optimistic subclass
+    text = _replace_once(
+        text, SWITCH_SETUP_CLASS_OLD, SWITCH_SETUP_CLASS_NEW, "power-mode entity class"
+    )
+
+    # 5. Insert the optimistic power-mode switch subclass
+    text = _replace_once(
+        text,
+        SWITCH_ENERGY_CLASS_ANCHOR,
+        SWITCH_POWER_MODE_ENTITY + SWITCH_ENERGY_CLASS_ANCHOR,
+        "power-mode switch subclass",
     )
 
     path.write_text(text)
@@ -344,6 +402,25 @@ COORD_RETURN_NEW = """\
         return result
 """
 
+# The optimistic-command persistence method, appended to the vehicle
+# coordinator (right after its _async_update_data return).
+COORD_MARK_OLD = "        result.update(self.power_modes.update(vehicle_data_pb, timestamp))\n        return result\n"
+COORD_MARK_NEW = COORD_MARK_OLD + '''
+    def mark_power_mode(self, key: str, value: bool) -> None:
+        """Record an optimistic power-mode value from a just-issued command.
+
+        The switch toggles optimistically, but its real state comes from the
+        vehicle_data protobuf, which lags and is cached while the car sleeps.
+        Persist the value into both the coordinator data (so the next
+        offline/asleep refresh, which returns ``self.data`` verbatim, keeps it)
+        and the tracker (so a cached read can't revert it until a fresh capture
+        at/after the command confirms real state).
+        """
+        self.power_modes.set_optimistic({key: value}, int(time() * 1000))
+        if self.data is not None:
+            self.data[key] = value
+'''
+
 
 def patch_coordinator() -> None:
     """Read low power / keep accessory power from the vehicle_data protobuf.
@@ -363,6 +440,9 @@ def patch_coordinator() -> None:
     )
     text = _replace_once(
         text, COORD_RETURN_OLD, COORD_RETURN_NEW, "power-mode decode"
+    )
+    text = _replace_once(
+        text, COORD_MARK_OLD, COORD_MARK_NEW, "mark_power_mode method"
     )
     path.write_text(text)
     print("coordinator.py: re-applied power-mode reading")

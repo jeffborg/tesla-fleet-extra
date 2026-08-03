@@ -188,6 +188,14 @@ def test_switch_patch_reinjects_customizations(tmp_path, monkeypatch) -> None:
     assert "api.set_keep_accessory_power_mode(on=False)" in result
     assert "if vehicle.signing or not description.signing_required" in result
     assert "assumed_state" not in result
+    # The optimistic power-mode subclass and its routing must be re-injected.
+    assert (
+        "class TeslaFleetPowerModeSwitchEntity(TeslaFleetVehicleSwitchEntity)" in result
+    )
+    assert "self.coordinator.mark_power_mode(self.key, True)" in result
+    assert "self.coordinator.mark_power_mode(self.key, False)" in result
+    assert "TeslaFleetPowerModeSwitchEntity\n" in result
+    assert "if description.signing_required\n" in result
     # The result must be valid Python.
     compile(result, "switch.py", "exec")
 
@@ -237,6 +245,10 @@ def test_coordinator_patch_adds_power_mode_reading(tmp_path, monkeypatch) -> Non
     assert 'data.pop("vehicle_data", None)' in result
     assert 'timestamp = result.get("charge_state_timestamp")' in result
     assert "self.power_modes.update(vehicle_data_pb, timestamp)" in result
+    # The optimistic-command persistence method must be re-injected.
+    assert "def mark_power_mode(self, key: str, value: bool)" in result
+    assert "self.power_modes.set_optimistic({key: value}, int(time() * 1000))" in result
+    compile(result, "coordinator.py", "exec")
 
     # Re-running is a no-op.
     ap.patch_coordinator()

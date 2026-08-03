@@ -98,23 +98,51 @@ class PowerModeTracker:
     the switches back to a value the user already changed. This keeps the last
     known-good state and only updates it when a newer capture timestamp arrives,
     so a cached/stale read never overrides real state.
+
+    It also remembers an *optimistic* value from a just-issued command (see
+    ``set_optimistic``): the switch is toggled locally, but the protobuf state
+    lags (and is cached while the car sleeps), so a poll landing before Tesla
+    reflects the command — or an offline/asleep read — must not revert it. The
+    optimistic value is held until a capture whose timestamp is at or after the
+    command arrives.
     """
 
     def __init__(self) -> None:
         self._values: dict[str, bool] = {}
         self._timestamp: int = 0
+        # A capture must reach this timestamp (ms epoch, the time a command was
+        # issued) before it is trusted again; 0 means no command is pending.
+        self._pending_until: int = 0
+
+    def set_optimistic(self, values: dict[str, bool], command_time: int) -> None:
+        """Record state from a just-issued command, trusted until confirmed.
+
+        ``command_time`` is a millisecond epoch (compared against the capture's
+        ``charge_state_timestamp``). Until a capture at or after it arrives, a
+        cached/stale/offline read cannot revert these values.
+        """
+        self._values.update(values)
+        self._pending_until = command_time
 
     def update(self, vehicle_data_b64: str | None, timestamp: int) -> dict[str, bool]:
         """Refresh from a newer capture and return the current state to merge."""
         if vehicle_data_b64 is not None and (
             timestamp == 0 or timestamp > self._timestamp
         ):
+            # While a command is pending, only a capture proven newer than the
+            # command may override it. A cached/asleep read carries a pre-command
+            # (or missing) timestamp, so it must not revert the optimistic value.
+            if self._pending_until and (timestamp == 0 or timestamp < self._pending_until):
+                return dict(self._values)
             decoded = decode_power_modes(vehicle_data_b64)
             if decoded:
                 self._values = decoded
                 # Keep the watermark monotonic so a missing (0) timestamp never
                 # lowers it and lets a later stale read through.
                 self._timestamp = max(self._timestamp, timestamp)
+                # A capture at/after the command confirms (or supersedes) it.
+                if timestamp and timestamp >= self._pending_until:
+                    self._pending_until = 0
         return dict(self._values)
 
 

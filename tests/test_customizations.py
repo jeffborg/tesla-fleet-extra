@@ -54,6 +54,33 @@ def test_switch_source_uses_public_power_mode_api() -> None:
     assert "protobuf" not in src
 
 
+def test_switch_persists_optimistic_power_mode_state() -> None:
+    # The stale-state fix: the two power-mode switches must be the optimistic
+    # subclass that records the command on the coordinator, so a cached/offline
+    # read can't revert a just-issued toggle. Must survive an upstream sync.
+    src = (COMPONENT / "switch.py").read_text()
+    assert "class TeslaFleetPowerModeSwitchEntity" in src
+    assert "self.coordinator.mark_power_mode(self.key, True)" in src
+    assert "self.coordinator.mark_power_mode(self.key, False)" in src
+    assert "if description.signing_required" in src
+
+
+def test_coordinator_marks_optimistic_power_mode() -> None:
+    # Counterpart to the switch: the coordinator persists the optimistic value
+    # into both the tracker and self.data so the offline early-return keeps it.
+    src = (COMPONENT / "coordinator.py").read_text()
+    assert "def mark_power_mode(self, key: str, value: bool)" in src
+    assert "set_optimistic(" in src
+
+
+def test_power_mode_tracker_holds_pending_command() -> None:
+    # The tracker must implement the optimistic/pending guard that keeps a
+    # just-issued command until a fresh capture confirms it.
+    src = (COMPONENT / "power_mode.py").read_text()
+    assert "def set_optimistic(" in src
+    assert "_pending_until" in src
+
+
 def test_init_logs_per_vehicle_command_signing() -> None:
     # Fork-only diagnostic (issue #17): the raw command_signing value is logged
     # at debug so a user whose power-mode switches are missing can see what

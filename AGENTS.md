@@ -36,7 +36,11 @@ The only intentional differences from HA core's `tesla_fleet` are:
    **public** `tesla-fleet-api` methods `set_low_power_mode(on)` and
    `set_keep_accessory_power_mode(on)` — do **not** reach into private
    internals (e.g. `api._command`) or hand-build protobuf. They are normal
-   toggles (real state comes from `power_mode.py`), not assumed-state.
+   toggles (real state comes from `power_mode.py`), not assumed-state. These two
+   are built as a fork-only subclass `TeslaFleetPowerModeSwitchEntity` that,
+   after a successful command, calls `coordinator.mark_power_mode(key, value)`
+   so the optimistic toggle is persisted and a cached/offline read can't revert
+   it (see #4/#5).
 2. **`manifest.json`** — adds a `version` field (required for custom
    components) and floors `tesla-fleet-api` to **>= 1.7.2** (the power-mode
    methods need it; older HA releases pin lower, e.g. 2026.7.2 pins 1.4.7). The
@@ -46,11 +50,18 @@ The only intentional differences from HA core's `tesla_fleet` are:
    switches (`icons.json` is synced verbatim; the switches use default icons).
 4. **`coordinator.py`** — requests the `vehicle_data_combo` endpoint and merges
    the decoded low-power / keep-accessory-power state (from `power_mode.py`)
-   into the coordinator data, so the two switches show **real** state.
+   into the coordinator data, so the two switches show **real** state. Also adds
+   `mark_power_mode(key, value)`, which the switch calls after a command to
+   persist the optimistic value into both `self.data` (so the offline
+   early-return, which returns `self.data` verbatim, keeps it) and the tracker.
 5. **`power_mode.py`** — fork-only module (no core equivalent). Decodes the
    base64 `vehicle_data` protobuf: `charge_state` field 191 = low power,
    field 194 = keep accessory power (both undocumented in Tesla's proto, so
-   decoded from raw wire format). The upstream sync leaves it untouched.
+   decoded from raw wire format). `PowerModeTracker` only updates from a capture
+   with a newer timestamp (a cached/asleep read carries a stale one) and holds
+   an optimistic value from `set_optimistic` until a capture at/after the
+   command confirms it — so a just-issued toggle isn't reverted by a stale/
+   cached read while the car sleeps. The upstream sync leaves it untouched.
 6. **`__init__.py`** — widens the `signing` check to
    `command_signing in ("required", "allowed")` (core only checks `"required"`),
    so the switches also appear on `"allowed"` vehicles like the 2025 Model 3

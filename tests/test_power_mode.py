@@ -161,6 +161,52 @@ def test_tracker_zero_timestamp_keeps_watermark() -> None:
     assert tracker.update(_make(low=0), 150) == {"vehicle_state_low_power_mode": True}
 
 
+def test_optimistic_survives_cached_read() -> None:
+    # The reported bug: user turns the switch off; the car then sleeps and the
+    # Fleet API returns a cached charge_state (older/equal timestamp) still
+    # showing "on". The optimistic off must NOT be reverted.
+    tracker = pm.PowerModeTracker()
+    tracker.update(_make(keep=1), 1000)  # last real state: keep = on
+
+    tracker.set_optimistic({"vehicle_state_keep_accessory_power_on": False}, 2000)
+    # Cached/asleep read with a pre-command (or equal) timestamp is ignored.
+    assert tracker.update(_make(keep=1), 1000) == {
+        "vehicle_state_keep_accessory_power_on": False
+    }
+    assert tracker.update(_make(keep=1), 1500) == {
+        "vehicle_state_keep_accessory_power_on": False
+    }
+    # A missing-timestamp read during a pending command is also ignored.
+    assert tracker.update(_make(keep=1), 0) == {
+        "vehicle_state_keep_accessory_power_on": False
+    }
+
+
+def test_optimistic_cleared_by_fresh_capture() -> None:
+    # A capture at/after the command confirms real state and ends the pending
+    # window, so subsequent genuine changes are trusted again.
+    tracker = pm.PowerModeTracker()
+    tracker.set_optimistic({"vehicle_state_low_power_mode": False}, 2000)
+    # Fresh capture (ts >= command) is trusted — here it confirms the off.
+    assert tracker.update(_make(low=0), 2500) == {
+        "vehicle_state_low_power_mode": False
+    }
+    # Pending is cleared: a later real on is now honoured immediately.
+    assert tracker.update(_make(low=1), 2600) == {
+        "vehicle_state_low_power_mode": True
+    }
+
+
+def test_optimistic_overridden_when_car_changes_it_back() -> None:
+    # If the owner flips it back in the app, the next fresh capture (newer than
+    # the command) must win over the optimistic value.
+    tracker = pm.PowerModeTracker()
+    tracker.set_optimistic({"vehicle_state_low_power_mode": False}, 2000)
+    assert tracker.update(_make(low=1), 3000) == {
+        "vehicle_state_low_power_mode": True
+    }
+
+
 def test_coordinator_merge_contract() -> None:
     # Mirrors what coordinator._async_update_data does: pop the protobuf, decode
     # it, and merge the booleans into the (flattened) result dict.
