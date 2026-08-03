@@ -116,9 +116,11 @@ async def async_setup_entry(
     async_add_entities(
         chain(
             (
-                TeslaFleetVehicleSwitchEntity(
-                    vehicle, description, entry.runtime_data.scopes
-                )
+                (
+                    TeslaFleetPowerModeSwitchEntity
+                    if description.signing_required
+                    else TeslaFleetVehicleSwitchEntity
+                )(vehicle, description, entry.runtime_data.scopes)
                 for vehicle in entry.runtime_data.vehicles
                 for description in VEHICLE_DESCRIPTIONS
                 # Signed-only commands (low power / keep accessory power) are
@@ -191,6 +193,28 @@ class TeslaFleetVehicleSwitchEntity(TeslaFleetVehicleEntity, TeslaFleetSwitchEnt
         await handle_vehicle_command(self.entity_description.off_func(self.api))
         self._attr_is_on = False
         self.async_write_ha_state()
+
+
+class TeslaFleetPowerModeSwitchEntity(TeslaFleetVehicleSwitchEntity):
+    """Signed low-power / keep-accessory-power switch.
+
+    Its real state comes from the vehicle_data snapshot, which lags and is
+    cached while the car sleeps. After a successful command, record the
+    optimistic value on the coordinator so a later cached/offline read can't
+    revert a command the user just issued until a fresh capture confirms it.
+    """
+
+    @override
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn on and record the optimistic power-mode state."""
+        await super().async_turn_on(**kwargs)
+        self.coordinator.mark_power_mode(self.key, True)
+
+    @override
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn off and record the optimistic power-mode state."""
+        await super().async_turn_off(**kwargs)
+        self.coordinator.mark_power_mode(self.key, False)
 
 
 class TeslaFleetChargeFromGridSwitchEntity(

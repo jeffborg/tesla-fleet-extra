@@ -226,6 +226,20 @@ class TeslaFleetVehicleDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         result.update(self.power_modes.update(vehicle_data_pb, timestamp))
         return result
 
+    def mark_power_mode(self, key: str, value: bool) -> None:
+        """Record an optimistic power-mode value from a just-issued command.
+
+        The switch toggles optimistically, but its real state comes from the
+        vehicle_data protobuf, which lags and is cached while the car sleeps.
+        Persist the value into both the coordinator data (so the next
+        offline/asleep refresh, which returns ``self.data`` verbatim, keeps it)
+        and the tracker (so a cached read can't revert it until a fresh capture
+        at/after the command confirms real state).
+        """
+        self.power_modes.set_optimistic({key: value}, int(time() * 1000))
+        if self.data is not None:
+            self.data[key] = value
+
 
 class TeslaFleetEnergySiteLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Class to manage fetching energy site live status from the TeslaFleet API."""

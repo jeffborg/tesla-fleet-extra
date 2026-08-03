@@ -84,6 +84,91 @@ def test_library_methods_accept_on_kwarg(method: str) -> None:
     assert list(params) == ["self", "on"]
 
 
+def test_power_mode_switches_use_optimistic_subclass() -> None:
+    # The two signed power-mode switches must be the optimistic subclass so a
+    # cached/offline read can't revert a just-issued command; the other
+    # (JSON-backed) switches stay on the base class.
+    assert issubclass(
+        switch.TeslaFleetPowerModeSwitchEntity, switch.TeslaFleetVehicleSwitchEntity
+    )
+    cls_for = {
+        d.key: (
+            switch.TeslaFleetPowerModeSwitchEntity
+            if d.signing_required
+            else switch.TeslaFleetVehicleSwitchEntity
+        )
+        for d in switch.VEHICLE_DESCRIPTIONS
+    }
+    for key in CUSTOM_SWITCHES:
+        assert cls_for[key] is switch.TeslaFleetPowerModeSwitchEntity
+    assert cls_for["vehicle_state_sentry_mode"] is switch.TeslaFleetVehicleSwitchEntity
+
+
+@pytest.mark.parametrize("key", CUSTOM_SWITCHES)
+@pytest.mark.parametrize("turn_on", [True, False])
+async def test_power_mode_switch_marks_optimistic_state(
+    key: str, turn_on: bool
+) -> None:
+    # After a successful command the switch must persist the optimistic value on
+    # the coordinator (both the tracker and the data), or the next offline poll
+    # reverts it — the reported stale-state bug.
+    from types import SimpleNamespace
+
+    marks: list[tuple[str, bool]] = []
+    coordinator = SimpleNamespace(
+        data={key: not turn_on},
+        mark_power_mode=lambda k, v: marks.append((k, v)),
+    )
+
+    entity = switch.TeslaFleetPowerModeSwitchEntity.__new__(
+        switch.TeslaFleetPowerModeSwitchEntity
+    )
+    entity.entity_description = _description(key)
+    entity.key = key
+    entity.coordinator = coordinator
+    entity.scoped = True
+    entity.api = _FakeSignedApi()
+    entity.raise_for_read_only = lambda scope: None
+    entity.wake_up_if_asleep = _noop
+    entity.async_write_ha_state = lambda: None
+
+    if turn_on:
+        await entity.async_turn_on()
+    else:
+        await entity.async_turn_off()
+
+    assert entity._attr_is_on is turn_on
+    assert marks == [(key, turn_on)]
+
+
+async def _noop(*args, **kwargs) -> None:
+    return None
+
+
+def test_coordinator_mark_power_mode_persists_both_places() -> None:
+    # End-to-end contract for the stale-state fix: mark_power_mode must update
+    # self.data (so the offline early-return, which returns self.data verbatim,
+    # keeps the value) AND the tracker (so a cached read can't revert it).
+    from custom_components.tesla_fleet import coordinator as coord
+    from custom_components.tesla_fleet.power_mode import PowerModeTracker
+
+    key = "vehicle_state_keep_accessory_power_on"
+    c = coord.TeslaFleetVehicleDataCoordinator.__new__(
+        coord.TeslaFleetVehicleDataCoordinator
+    )
+    c.power_modes = PowerModeTracker()
+    c.data = {key: True}  # last known real state: on
+
+    c.mark_power_mode(key, False)
+
+    # self.data reflects the optimistic off (offline refresh returns this).
+    assert c.data[key] is False
+    # A stale/cached read (old timestamp) via the tracker cannot revert it.
+    from tests.test_power_mode import _make
+
+    assert c.power_modes.update(_make(keep=1), 1) == {key: False}
+
+
 @pytest.mark.parametrize("key", CUSTOM_SWITCHES)
 def test_switch_reflects_decoded_coordinator_state(key: str) -> None:
     # The coordinator merges the decoded protobuf booleans under the switch
