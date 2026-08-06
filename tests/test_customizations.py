@@ -30,9 +30,16 @@ def _load_json(name: str) -> dict:
 
 def test_manifest_pins_dependency_with_power_mode_methods() -> None:
     manifest = _load_json("manifest.json")
-    # 1.7.2 is the first release exposing set_low_power_mode /
-    # set_keep_accessory_power_mode and the version HA core pins.
-    assert manifest["requirements"] == ["tesla-fleet-api==1.7.2"]
+    # The power-mode commands (set_low_power_mode / set_keep_accessory_power_mode)
+    # need tesla-fleet-api >= 1.7.2. apply_patches floors the pin to that but
+    # never downgrades a newer core pin, so assert the floor rather than an exact
+    # value (core has since moved past 1.7.2, e.g. 1.7.6).
+    pins = [
+        r for r in manifest["requirements"] if r.startswith("tesla-fleet-api==")
+    ]
+    assert len(pins) == 1, manifest["requirements"]
+    version = tuple(int(p) for p in pins[0].split("==", 1)[1].split("."))
+    assert version >= (1, 7, 2), pins[0]
 
 
 def test_manifest_has_custom_component_version() -> None:

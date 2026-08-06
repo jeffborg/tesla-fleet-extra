@@ -114,6 +114,35 @@ def test_manifest_patch_adds_default_version_and_is_idempotent(
     assert (comp / "manifest.json").read_text() == once
 
 
+def test_requirements_test_pin_follows_manifest(tmp_path, monkeypatch) -> None:
+    # The CI test env's tesla-fleet-api pin must track the (floored) manifest pin
+    # so a core bump (e.g. 1.7.2 -> 1.7.6) updates both together — otherwise a
+    # sync PR ships a manifest requiring a version the tests never exercise.
+    comp = tmp_path / "tesla_fleet"
+    comp.mkdir()
+    (comp / "manifest.json").write_text(
+        json.dumps({"domain": "tesla_fleet", "requirements": ["tesla-fleet-api==1.7.6"]})
+    )
+    req = tmp_path / "requirements_test.txt"
+    req.write_text(
+        "homeassistant==2026.7.2\ntesla-fleet-api==1.7.2\npytest==9.1.1\n"
+    )
+    monkeypatch.setattr(ap, "COMPONENT_DIR", comp)
+    monkeypatch.setattr(ap, "REQUIREMENTS_TEST", req)
+
+    ap.patch_requirements_test()
+    lines = req.read_text().splitlines()
+    assert "tesla-fleet-api==1.7.6" in lines
+    # Other pins are left untouched.
+    assert "homeassistant==2026.7.2" in lines
+    assert "pytest==9.1.1" in lines
+
+    # Re-running is a no-op.
+    once = req.read_text()
+    ap.patch_requirements_test()
+    assert req.read_text() == once
+
+
 def test_manifest_patch_preserves_committed_version(tmp_path, monkeypatch) -> None:
     # A sync must not reset a released version back to the default.
     comp = tmp_path / "tesla_fleet"

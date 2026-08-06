@@ -5,7 +5,10 @@ The upstream sync workflow downloads ``custom_components/tesla_fleet`` verbatim
 from ``home-assistant/core``. This script then re-adds the small set of changes
 that make this a custom component:
 
-* ``manifest.json`` — the ``version`` field custom components require.
+* ``manifest.json`` — the ``version`` field custom components require, and a
+  floor on the ``tesla-fleet-api`` pin (>= the power-mode minimum).
+* ``requirements_test.txt`` — the CI test env's ``tesla-fleet-api`` pin is kept
+  aligned with the (floored) manifest pin so tests exercise what ships.
 * ``switch.py`` — the two extra vehicle switches (low power mode / keep
   accessory power) sent via the public ``tesla-fleet-api`` power-mode methods.
 * ``__init__.py`` — treat ``command_signing == "allowed"`` as signing-capable
@@ -33,6 +36,7 @@ import urllib.request
 from pathlib import Path
 
 COMPONENT_DIR = Path("custom_components/tesla_fleet")
+REQUIREMENTS_TEST = Path("requirements_test.txt")
 UPSTREAM_REF = os.environ.get("UPSTREAM_REF", "2026.7.2")
 RAW_BASE = (
     f"https://raw.githubusercontent.com/home-assistant/core/{UPSTREAM_REF}/homeassistant"
@@ -145,6 +149,40 @@ def patch_manifest() -> None:
     ordered.update({k: manifest[k] for k in sorted(manifest)})
     path.write_text(json.dumps(ordered, indent=2) + "\n")
     print(f"manifest.json: applied fork fields (version {ordered.get('version')})")
+
+
+def _manifest_tesla_fleet_api_pin() -> str | None:
+    """Return the tesla-fleet-api ``==`` requirement from the manifest, or None."""
+    manifest = json.loads((COMPONENT_DIR / "manifest.json").read_text())
+    for req in manifest.get("requirements", []):
+        if req.startswith("tesla-fleet-api=="):
+            return req
+    return None
+
+
+def patch_requirements_test() -> None:
+    """Keep the test env's tesla-fleet-api pin aligned with the manifest.
+
+    The manifest pin is floored to the power-mode minimum and otherwise follows
+    core's bumps; the CI test environment should install the same version so it
+    exercises what ships. Run after ``patch_manifest`` and touch only the
+    tesla-fleet-api line (homeassistant / pytest / ruff pins are left alone).
+    """
+    pin = _manifest_tesla_fleet_api_pin()
+    if pin is None or not REQUIREMENTS_TEST.exists():
+        return
+    lines = REQUIREMENTS_TEST.read_text().splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.strip().startswith("tesla-fleet-api=="):
+            updated = pin + ("\n" if line.endswith("\n") else "")
+            if line == updated:
+                print("requirements_test.txt: tesla-fleet-api pin already aligned")
+                return
+            lines[i] = updated
+            REQUIREMENTS_TEST.write_text("".join(lines))
+            print(f"requirements_test.txt: aligned tesla-fleet-api pin to {pin}")
+            return
+    print("requirements_test.txt: no tesla-fleet-api pin to align")
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +591,7 @@ def main() -> None:
         print(f"ERROR: {COMPONENT_DIR} does not exist", file=sys.stderr)
         sys.exit(1)
     patch_manifest()
+    patch_requirements_test()
     patch_switch()
     patch_init()
     patch_coordinator()
