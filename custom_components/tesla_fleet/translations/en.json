@@ -2,15 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "Configuration updated for profile.",
-            "already_in_progress": "Configuration flow is already in progress",
-            "authorize_url_timeout": "Timeout while generating an authorization URL.",
+            "already_in_progress": "This is already being configured. Finish the existing configuration before starting again.",
             "missing_configuration": "The component is not configured. Please follow the documentation.",
-            "no_url_available": "No URL available. For information about this error, [check the help section]({docs_url})",
-            "oauth_error": "Received invalid token data.",
-            "oauth_failed": "Error while obtaining access token.",
-            "oauth_implementation_unavailable": "No OAuth2 implementations are currently available.",
-            "oauth_timeout": "Timeout while resolving the OAuth token.",
-            "oauth_unauthorized": "OAuth authorization error while obtaining access token.",
             "reauth_account_mismatch": "The reauthentication account does not match the original account",
             "reauth_successful": "Re-authentication was successful"
         },
@@ -18,6 +11,7 @@
             "default": "Successfully authenticated with Tesla."
         },
         "error": {
+            "cannot_connect": "Failed to connect",
             "invalid_domain": "Invalid domain format. Please enter a valid domain name.",
             "invalid_response": "The registration was rejected by Tesla",
             "precondition_failed": "The domain does not match the application's allowed origins.",
@@ -52,6 +46,15 @@
             "reauth_confirm": {
                 "description": "The {name} integration needs to re-authenticate your account. Reauthentication refreshes the Tesla API permissions granted to Home Assistant, including any newly enabled scopes.",
                 "title": "Authentication expired for {name}"
+            },
+            "region": {
+                "data": {
+                    "region": "Region"
+                },
+                "data_description": {
+                    "region": "The region to register your application in. This defaults to the region detected from your Tesla account and only needs changing if your vehicles or energy sites are in a different region."
+                },
+                "title": "Select region"
             },
             "registration_complete": {
                 "data": {
@@ -615,6 +618,9 @@
         "command_reason": {
             "message": "Command was unsuccessful: {reason}"
         },
+        "homelink_no_location": {
+            "message": "Vehicle location is not available. Ensure the vehicle is awake and that the location scope has been granted."
+        },
         "invalid_cop_temp": {
             "message": "Cabin overheat protection does not support that temperature."
         },
@@ -647,6 +653,14 @@
         },
         "wake_up_timeout": {
             "message": "Could not wake up vehicle"
+        }
+    },
+    "selector": {
+        "region": {
+            "options": {
+                "eu": "Europe, Middle East & Africa",
+                "na": "North America & Asia-Pacific"
+            }
         }
     }
 }

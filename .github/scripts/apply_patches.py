@@ -27,6 +27,7 @@ loudly (and fails the run) so upstream refactors do not silently drop a switch.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import os
 import re
@@ -37,7 +38,7 @@ from pathlib import Path
 
 COMPONENT_DIR = Path("custom_components/tesla_fleet")
 REQUIREMENTS_TEST = Path("requirements_test.txt")
-UPSTREAM_REF = os.environ.get("UPSTREAM_REF", "2026.7.2")
+UPSTREAM_REF = os.environ.get("UPSTREAM_REF", "2026.9.4")
 RAW_BASE = (
     f"https://raw.githubusercontent.com/home-assistant/core/{UPSTREAM_REF}/homeassistant"
 )
@@ -273,6 +274,24 @@ def _replace_once(text: str, old: str, new: str, what: str) -> str:
     return text.replace(old, new)
 
 
+def _sub_once(
+    text: str,
+    pattern: re.Pattern[str],
+    repl: str | Callable[[re.Match[str]], str],
+    what: str,
+) -> str:
+    """Regex-substitute a unique match or raise PatchError.
+
+    Structural (regex) anchors survive upstream churn that a literal anchor
+    does not — e.g. core swapping ``datetime.now()`` for ``time()`` on the line
+    below the one we insert next to (HA 2026.9.x did exactly that).
+    """
+    count = len(pattern.findall(text))
+    if count != 1:
+        raise PatchError(f"expected exactly one anchor for {what!r}, found {count}")
+    return pattern.sub(repl, text, count=1)
+
+
 def patch_switch() -> None:
     """Re-add the low power / keep accessory power switch entities."""
     path = COMPONENT_DIR / "switch.py"
@@ -376,25 +395,18 @@ def patch_init() -> None:
 # coordinator.py
 # ---------------------------------------------------------------------------
 
-COORD_IMPORT = (
-    "from .const import DOMAIN, ENERGY_HISTORY_FIELDS, LOGGER, TeslaFleetState\n"
-)
-COORD_IMPORT_NEW = (
-    COORD_IMPORT + "from .power_mode import POWER_MODE_ENDPOINT, PowerModeTracker\n"
-)
+# The ``from .const import ...`` line, whatever core imports from it today.
+COORD_IMPORT_RE = re.compile(r"^from \.const import [^\n]*\n", re.MULTILINE)
+COORD_IMPORT_ADD = "from .power_mode import POWER_MODE_ENDPOINT, PowerModeTracker\n"
 
-COORD_INIT_OLD = (
-    "        self.data = flatten(product)\n"
-    "        self.updated_once = False\n"
-    "        self.last_active = datetime.now()"
-    "  # pylint: disable=home-assistant-enforce-naive-now\n"
-)
-COORD_INIT_NEW = (
-    "        self.data = flatten(product)\n"
-    "        self.power_modes = PowerModeTracker()\n"
-    "        self.updated_once = False\n"
-    "        self.last_active = datetime.now()"
-    "  # pylint: disable=home-assistant-enforce-naive-now\n"
+# The vehicle coordinator's ``self.data = flatten(product)``. Anchored from the
+# class statement (non-greedy) because the energy-site coordinator has the same
+# assignment, and the lines around it churn upstream — 2026.9.x replaced the
+# following ``last_active = datetime.now()`` with ``time()``.
+COORD_INIT_RE = re.compile(
+    r"(class TeslaFleetVehicleDataCoordinator\b.*?\n"
+    r"(?P<indent>[ ]+)self\.data = flatten\(product\)\n)",
+    re.DOTALL,
 )
 
 COORD_ENDPOINTS_OLD = (
@@ -422,12 +434,14 @@ COORD_ENDPOINTS_NEW = """\
                 response = await self.api.vehicle_data(endpoints=self.endpoints)
 """
 
-COORD_RETURN_OLD = (
-    "                    self.update_interval = VEHICLE_WAIT\n\n        return flatten(data)\n"
+# The vehicle coordinator's ``return flatten(data)`` — the one that follows the
+# sleep-handling ``update_interval = VEHICLE_WAIT`` branch (the energy
+# coordinators have their own ``return flatten(data)``).
+COORD_RETURN_RE = re.compile(
+    r"(self\.update_interval = VEHICLE_WAIT\n\s*\n)        return flatten\(data\)\n"
 )
 COORD_RETURN_NEW = """\
-                    self.update_interval = VEHICLE_WAIT
-
+\\1\
         # Low power / keep accessory power live only in the protobuf snapshot
         # (vehicle_data_combo endpoint), not the JSON. Merge in the decoded
         # state, but only from a fresh capture: an asleep car returns a cached
@@ -471,14 +485,19 @@ def patch_coordinator() -> None:
     if "from .power_mode import" in text:
         print("coordinator.py: customizations already present")
         return
-    text = _replace_once(text, COORD_IMPORT, COORD_IMPORT_NEW, "power_mode import")
-    text = _replace_once(text, COORD_INIT_OLD, COORD_INIT_NEW, "PowerModeTracker init")
+    text = _sub_once(
+        text, COORD_IMPORT_RE, lambda m: m.group(0) + COORD_IMPORT_ADD, "power_mode import"
+    )
+    text = _sub_once(
+        text,
+        COORD_INIT_RE,
+        lambda m: m.group(1) + f"{m.group('indent')}self.power_modes = PowerModeTracker()\n",
+        "PowerModeTracker init",
+    )
     text = _replace_once(
         text, COORD_ENDPOINTS_OLD, COORD_ENDPOINTS_NEW, "vehicle_data_combo endpoint"
     )
-    text = _replace_once(
-        text, COORD_RETURN_OLD, COORD_RETURN_NEW, "power-mode decode"
-    )
+    text = _sub_once(text, COORD_RETURN_RE, COORD_RETURN_NEW, "power-mode decode")
     text = _replace_once(
         text, COORD_MARK_OLD, COORD_MARK_NEW, "mark_power_mode method"
     )

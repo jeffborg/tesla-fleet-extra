@@ -233,36 +233,63 @@ def test_switch_patch_reinjects_customizations(tmp_path, monkeypatch) -> None:
     assert (comp / "switch.py").read_text() == result
 
 
-CORE_COORDINATOR = (
-    "from .const import DOMAIN, ENERGY_HISTORY_FIELDS, LOGGER, TeslaFleetState\n"
-    "\n\n"
-    "class TeslaFleetVehicleDataCoordinator:\n"
-    "    def __init__(self):\n"
-    "        self.api = api\n"
-    "        self.data = flatten(product)\n"
-    "        self.updated_once = False\n"
-    "        self.last_active = datetime.now()"
-    "  # pylint: disable=home-assistant-enforce-naive-now\n"
-    "\n"
-    "    async def _async_update_data(self):\n"
-    "        try:\n"
-    "            response = await self.api.vehicle_data(endpoints=self.endpoints)\n"
-    '            data = response["response"]\n'
-    "        except Exception:\n"
-    "            pass\n"
-    "        if a:\n"
-    "            if b:\n"
-    "                if c:\n"
-    "                    self.update_interval = VEHICLE_WAIT\n"
-    "\n"
-    "        return flatten(data)\n"
+# Two coordinator shapes: the 2026.7.x one (naive-now ``last_active``) and the
+# 2026.9.x one (``time()``). The patcher must handle both — core swapping those
+# lines is exactly what broke the literal anchors. Both carry a second
+# coordinator class with the same ``flatten`` lines, so an anchor that is not
+# scoped to the vehicle coordinator is caught as ambiguous.
+def _core_coordinator(last_active: str) -> str:
+    return (
+        "from .const import DOMAIN, ENERGY_HISTORY_FIELDS, LOGGER, TeslaFleetState\n"
+        "\n\n"
+        "class TeslaFleetVehicleDataCoordinator:\n"
+        "    def __init__(self):\n"
+        "        self.api = api\n"
+        "        self.data = flatten(product)\n"
+        "        self.updated_once = False\n"
+        f"        {last_active}\n"
+        "\n"
+        "    async def _async_update_data(self):\n"
+        "        try:\n"
+        "            response = await self.api.vehicle_data(endpoints=self.endpoints)\n"
+        '            data = response["response"]\n'
+        "        except Exception:\n"
+        "            pass\n"
+        "        if a:\n"
+        "            if b:\n"
+        "                if c:\n"
+        "                    self.update_interval = VEHICLE_WAIT\n"
+        "\n"
+        "        return flatten(data)\n"
+        "\n\n"
+        "class TeslaFleetEnergySiteInfoCoordinator:\n"
+        "    def __init__(self):\n"
+        "        self.api = api\n"
+        "        self.data = flatten(product)\n"
+        "        self.updated_once = False\n"
+        "\n"
+        "    async def _async_update_data(self):\n"
+        "        return flatten(data)\n"
+    )
+
+
+CORE_COORDINATOR = _core_coordinator(
+    "self.last_active = datetime.now()"
+    "  # pylint: disable=home-assistant-enforce-naive-now"
 )
+# HA 2026.9.x replaced the naive-now call with time().
+CORE_COORDINATOR_2026_9 = _core_coordinator("self.last_active = time()")
 
 
-def test_coordinator_patch_adds_power_mode_reading(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "core_source", [CORE_COORDINATOR, CORE_COORDINATOR_2026_9], ids=["2026.7", "2026.9"]
+)
+def test_coordinator_patch_adds_power_mode_reading(
+    tmp_path, monkeypatch, core_source
+) -> None:
     comp = tmp_path / "tesla_fleet"
     comp.mkdir()
-    (comp / "coordinator.py").write_text(CORE_COORDINATOR)
+    (comp / "coordinator.py").write_text(core_source)
     monkeypatch.setattr(ap, "COMPONENT_DIR", comp)
 
     ap.patch_coordinator()
@@ -277,11 +304,29 @@ def test_coordinator_patch_adds_power_mode_reading(tmp_path, monkeypatch) -> Non
     # The optimistic-command persistence method must be re-injected.
     assert "def mark_power_mode(self, key: str, value: bool)" in result
     assert "self.power_modes.set_optimistic({key: value}, int(time() * 1000))" in result
+    # Only the vehicle coordinator is touched, not the energy one.
+    assert result.count("self.power_modes = PowerModeTracker()") == 1
+    energy = result[result.index("class TeslaFleetEnergySiteInfoCoordinator") :]
+    assert "power_modes" not in energy
     compile(result, "coordinator.py", "exec")
 
     # Re-running is a no-op.
     ap.patch_coordinator()
     assert (comp / "coordinator.py").read_text() == result
+
+
+def test_coordinator_patch_rejects_missing_anchor(tmp_path, monkeypatch) -> None:
+    # An upstream refactor that renames the vehicle coordinator must fail loudly
+    # rather than silently dropping the power-mode reading.
+    comp = tmp_path / "tesla_fleet"
+    comp.mkdir()
+    (comp / "coordinator.py").write_text(
+        CORE_COORDINATOR_2026_9.replace("TeslaFleetVehicleDataCoordinator", "Renamed")
+    )
+    monkeypatch.setattr(ap, "COMPONENT_DIR", comp)
+
+    with pytest.raises(ap.PatchError, match="PowerModeTracker init"):
+        ap.patch_coordinator()
 
 
 CORE_INIT = (
