@@ -43,8 +43,9 @@ The only intentional differences from HA core's `tesla_fleet` are:
    it (see #4/#5).
 2. **`manifest.json`** — adds a `version` field (required for custom
    components) and floors `tesla-fleet-api` to **>= 1.7.2** (the power-mode
-   methods need it; older HA releases pin lower, e.g. 2026.7.2 pins 1.4.7). The
-   floor never downgrades a newer core pin — see `_floor_tesla_fleet_api` in
+   methods need it; older HA releases pin lower, e.g. 2026.7.2 pins 1.4.7 —
+   2026.9.4 already pins 1.10.0, so the floor is a no-op there). The floor
+   never downgrades a newer core pin — see `_floor_tesla_fleet_api` in
    `apply_patches.py`.
 3. **`strings.json` / `translations/en.json`** — entries for the two extra
    switches (`icons.json` is synced verbatim; the switches use default icons).
@@ -83,8 +84,12 @@ Upstream source lives at
 - **Sync from the HA-core RELEASE tag matching your installed HA, not `dev`.**
   `dev` references core APIs newer HA doesn't have yet (e.g.
   `device_tracker.EntityStateAttribute`), which breaks entities on released HA.
-  The sync default and `apply_patches.py` target `2026.7.2`; bump both when you
-  upgrade HA.
+  The sync default and `apply_patches.py` target `2026.9.4`; bump both when you
+  upgrade HA (and `requirements_test.txt`'s `homeassistant` pin with them).
+- The patch anchors in `apply_patches.py` are **structural**: match a class
+  name / statement shape, not a block of adjacent lines, so a core refactor
+  nearby (2026.9 swapped `last_active = datetime.now()` for `time()`) doesn't
+  break the sync. `_sub_once` fails loudly on 0 or >1 matches.
 - `apply_patches.py` floors `tesla-fleet-api` to **>= 1.7.2** (power-mode
   methods), so the manifest works even when the synced core release pins lower.
 - Re-apply the customizations listed above after pulling upstream files.
