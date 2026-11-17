@@ -1,10 +1,17 @@
 {
   "domain": "tesla_fleet",
   "name": "Tesla Fleet",
+  "categories": [
+    "vehicles_transport.cars_evs",
+    "energy.solar_batteries"
+  ],
   "codeowners": [
     "@Bre77"
   ],
   "config_flow": true,
+  "connectivity": [
+    "cloud"
+  ],
   "dependencies": [
     "application_credentials",
     "http"
@@ -17,7 +24,7 @@
     "tesla-fleet-api"
   ],
   "requirements": [
-    "tesla-fleet-api==1.10.0"
+    "tesla-fleet-api==1.19.0"
   ],
-  "version": "1.0.6"
+  "version": "1.0.7"
 }

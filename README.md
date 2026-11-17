@@ -7,7 +7,10 @@ This is a custom component that extends the built-in Home Assistant Tesla Fleet 
 
 ## Requirements
 
-- Home Assistant 2024.x or later
+- Home Assistant **2026.11.0** or later — the bundled integration is a copy of
+  core's `tesla_fleet` from the 2026.11 release line and uses core APIs
+  introduced there (`probatio` schemas, the native-unit climate attributes).
+  Older Home Assistant versions need an older release of this component.
 - Tesla Fleet integration already configured
 - A Tesla vehicle with firmware supporting these features (required: Vehicle Command Protocol / signed commands)
 

@@ -35,10 +35,11 @@ jobs:
 
       - name: hassfest validation
         # The published hassfest image always tracks HA *dev*, whose
-        # tesla-fleet-api pin runs ahead of the release this fork syncs from
-        # (dev pins 1.17.2; 2026.9.4 pins 1.10.0), so the requirements plugin
-        # flags our release-matched pin as "incompatible". Skip just that
-        # plugin — the pin itself is covered by tests/test_apply_patches.py.
+        # tesla-fleet-api pin drifts ahead of the release this fork syncs from
+        # (both are 1.19.0 as of 2026.11.2, but dev moves first), and the
+        # requirements plugin then flags our release-matched pin as
+        # "incompatible". Skip just that plugin — the pin itself is covered by
+        # tests/test_apply_patches.py.
         # Run the image directly because the action exposes no arguments.
         run: |
           docker run --rm -v "${GITHUB_WORKSPACE}:/github/workspace" \
