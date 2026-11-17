@@ -44,7 +44,7 @@ The only intentional differences from HA core's `tesla_fleet` are:
 2. **`manifest.json`** — adds a `version` field (required for custom
    components) and floors `tesla-fleet-api` to **>= 1.7.2** (the power-mode
    methods need it; older HA releases pin lower, e.g. 2026.7.2 pins 1.4.7 —
-   2026.9.4 already pins 1.10.0, so the floor is a no-op there). The floor
+   2026.11.2 already pins 1.19.0, so the floor is a no-op there). The floor
    never downgrades a newer core pin — see `_floor_tesla_fleet_api` in
    `apply_patches.py`.
 3. **`strings.json` / `translations/en.json`** — entries for the two extra
@@ -84,7 +84,7 @@ Upstream source lives at
 - **Sync from the HA-core RELEASE tag matching your installed HA, not `dev`.**
   `dev` references core APIs newer HA doesn't have yet (e.g.
   `device_tracker.EntityStateAttribute`), which breaks entities on released HA.
-  The sync default and `apply_patches.py` target `2026.9.4`; bump both when you
+  The sync default and `apply_patches.py` target `2026.11.2`; bump both when you
   upgrade HA (and `requirements_test.txt`'s `homeassistant` pin with them).
 - The patch anchors in `apply_patches.py` are **structural**: match a class
   name / statement shape, not a block of adjacent lines, so a core refactor
@@ -92,6 +92,14 @@ Upstream source lives at
   break the sync. `_sub_once` fails loudly on 0 or >1 matches.
 - `apply_patches.py` floors `tesla-fleet-api` to **>= 1.7.2** (power-mode
   methods), so the manifest works even when the synced core release pins lower.
+- The synced files use core APIs from their release line, so **`hacs.json`'s
+  `homeassistant` floor must track the sync target** (2026.11 brought
+  `probatio` in place of `voluptuous`, the `_attr_native_*` climate
+  attributes, `async_get_or_create_from_info`, and
+  `async_unload_platforms_or_raise`). Bump it with the sync.
+- New upstream files are picked up automatically by the sync workflow (it
+  downloads every top-level file); 2026.11 added `services.py` /
+  `services.yaml` (the `navigate_to_*` actions) that way.
 - Re-apply the customizations listed above after pulling upstream files.
 - A GitHub Action under `.github/workflows/` automates this sync; keep its
   patch definitions in step with the customizations above.

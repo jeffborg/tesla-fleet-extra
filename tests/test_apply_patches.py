@@ -233,16 +233,20 @@ def test_switch_patch_reinjects_customizations(tmp_path, monkeypatch) -> None:
     assert (comp / "switch.py").read_text() == result
 
 
-# Two coordinator shapes: the 2026.7.x one (naive-now ``last_active``) and the
-# 2026.9.x one (``time()``). The patcher must handle both — core swapping those
-# lines is exactly what broke the literal anchors. Both carry a second
-# coordinator class with the same ``flatten`` lines, so an anchor that is not
-# scoped to the vehicle coordinator is caught as ambiguous.
-def _core_coordinator(last_active: str) -> str:
+# Three coordinator shapes: the 2026.7.x one (naive-now ``last_active``), the
+# 2026.9.x one (``time()``), and the 2026.11.x one (a shared
+# ``TeslaFleetCoordinator`` base class declared *before* the vehicle
+# coordinator, and ``update_interval`` set at the top of the update method).
+# The patcher must handle all three — core moving those lines around is exactly
+# what broke the literal anchors. Each carries a second coordinator class with
+# the same ``flatten`` lines, so an anchor that is not scoped to the vehicle
+# coordinator is caught as ambiguous.
+def _core_coordinator(last_active: str, base: str = "", prelude: str = "") -> str:
     return (
         "from .const import DOMAIN, ENERGY_HISTORY_FIELDS, LOGGER, TeslaFleetState\n"
         "\n\n"
-        "class TeslaFleetVehicleDataCoordinator:\n"
+        f"{prelude}"
+        f"class TeslaFleetVehicleDataCoordinator{base}:\n"
         "    def __init__(self):\n"
         "        self.api = api\n"
         "        self.data = flatten(product)\n"
@@ -250,6 +254,7 @@ def _core_coordinator(last_active: str) -> str:
         f"        {last_active}\n"
         "\n"
         "    async def _async_update_data(self):\n"
+        "        self.update_interval = VEHICLE_INTERVAL\n"
         "        try:\n"
         "            response = await self.api.vehicle_data(endpoints=self.endpoints)\n"
         '            data = response["response"]\n'
@@ -279,10 +284,26 @@ CORE_COORDINATOR = _core_coordinator(
 )
 # HA 2026.9.x replaced the naive-now call with time().
 CORE_COORDINATOR_2026_9 = _core_coordinator("self.last_active = time()")
+# HA 2026.11.x hoisted the rate-limit handling into a TeslaFleetCoordinator base
+# class, which is declared ahead of the vehicle coordinator and also assigns
+# ``self.data`` — so the vehicle-coordinator anchor must not match it.
+CORE_COORDINATOR_2026_11 = _core_coordinator(
+    "self.last_active = time()",
+    base="(TeslaFleetCoordinator)",
+    prelude=(
+        "class TeslaFleetCoordinator:\n"
+        "    def _handle_rate_limited(self, err):\n"
+        "        self.data = flatten(product)\n"
+        "        return self.data\n"
+        "\n\n"
+    ),
+)
 
 
 @pytest.mark.parametrize(
-    "core_source", [CORE_COORDINATOR, CORE_COORDINATOR_2026_9], ids=["2026.7", "2026.9"]
+    "core_source",
+    [CORE_COORDINATOR, CORE_COORDINATOR_2026_9, CORE_COORDINATOR_2026_11],
+    ids=["2026.7", "2026.9", "2026.11"],
 )
 def test_coordinator_patch_adds_power_mode_reading(
     tmp_path, monkeypatch, core_source
